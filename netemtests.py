@@ -89,7 +89,7 @@ class NetworkProfile():
             'before_time': self.before_time,
             'notify_time': self.notify_time,
             'outage_time': self.outage_time,
-            'valid': self.valid_time,
+            'valid': self.valid,
             'after_time': self.after_time
         }
 
@@ -152,9 +152,13 @@ class TestDescription():
     # Since these can be quite large, it is recommended to disable them
     # if filesize is a concern and you won't need detailed log information.
     write_logs: bool = True
+    write_headers: bool = True
 
     # Whether or not to overwrite previous tests.
     overwrite: bool = True
+
+    # How often to print out done/test_cases while running tests.
+    update: int = 10
 
     def mk_test_cases(self, 
                       videos, 
@@ -284,7 +288,7 @@ class TestDescription():
             # Set up output directory
             manifest = test_case.manifest()
             result_dirname = os.path.join(self.results_dir, str(test_case.uuid))
-            print(result_dirname)
+            #print(result_dirname)
             os.makedirs(result_dirname, exist_ok=True)
 
             # Run test
@@ -299,8 +303,9 @@ class TestDescription():
                                             test_case.proto)
 
             # Write results
-            with open(os.path.join(result_dirname, 'header.txt'), 'w+') as header_file:
-                header_file.write(header)
+            if self.write_headers:
+                with open(os.path.join(result_dirname, 'header.txt'), 'w+') as header_file:
+                    header_file.write(header)
 
             with open(os.path.join(result_dirname, 'results.json'), 'w+') as results_file:
                 json.dump(results, results_file)
@@ -313,11 +318,9 @@ class TestDescription():
                 json.dump(manifest, manifest_file)
             
             done += 1
-            if done % 10 == 0:
+            if done % self.update == 0:
                 print(f'{done} / {len(self.test_cases)}')
     
-
-
 class IStreamError(BaseException):
     pass
 
@@ -332,7 +335,7 @@ class SingleSwitchTopo(Topo):
 
 def rate_change_worker(network_profile, link, client_host):
     #link.intf1.bwParamMax = 4000
-    print(f'modifiying link: {link}')
+    #print(f'modifiying link: {link}')
     def sleep_worker():
         notifier_bin = DEFAULTS['notifier']
         for event in network_profile.profile:
@@ -510,7 +513,7 @@ def abr_test(initial_rate: int,
     #print('started istream player')
 
     #sleep(cushion)
-    print('link:', link.intf1)
+    #print('link:', link.intf1)
     rate_change_worker(events, link, h1)
 
     # Wait to avoid anything breaking
@@ -520,7 +523,7 @@ def abr_test(initial_rate: int,
     error_trace = istream_client.communicate()[1].decode('utf-8')
     results = istream_client.communicate()[0].decode('utf-8')
 
-    print('test finished')
+    #print('test finished')
     
     h2.popen('killall http-server')
     h1.popen('killall iplay')
@@ -528,7 +531,7 @@ def abr_test(initial_rate: int,
         h1.popen('killall quictun-client')
         h2.popen('killall quictun-server')
     
-    print('processes killed')
+    #print('processes killed')
     net.stop()
 
     if len(results) == 0:
@@ -664,7 +667,7 @@ if __name__ == '__main__':
                                    (10, 1.0, 20)], 
                         notify_times=[(1,1)], 
                         abrs=[None],
-                        search_methods=['none'], 
+                        search_methods=['greedy'], 
                         max_buffers=[None],
                         initial_qualities=[None], 
                         initial_buffers=[None], 
@@ -693,17 +696,15 @@ if __name__ == '__main__':
                         N=1)
     '''
     tests.mk_test_cases(videos=videos, 
-                        rates=[(300, 0.00001, 100)], 
-                        durations=[(10, 0.5, 20),
-                                   (10, 0.75, 20),
-                                   (10, 1.0, 20)], 
-                        notify_times=[(1,1), (5, 5)], 
-                        abrs=['bandwidth', 'lol', 'hybrid', 'buffer'], 
+                        rates=[(300, 50, 50)], 
+                        durations=[(10, 1.0, 20)], 
+                        notify_times=[(x,2) for x in range(1, 6)], 
+                        abrs=['fixed'], 
                         search_methods=['none', 'greedy'], 
-                        max_buffers=[1.0, 1.5, 2.0], 
-                        initial_qualities=[None], 
-                        initial_buffers=[None], 
-                        protos=['tcp'], 
+                        max_buffers=[1.5, 2.0], 
+                        initial_qualities=[4], 
+                        initial_buffers=[1.0], 
+                        protos=['quic'], 
                         N=1)
 
     tests.write_logs = False
