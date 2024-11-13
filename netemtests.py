@@ -79,6 +79,17 @@ class NetworkProfile():
 
     def get_duration(self):
         return self.before_time + self.outage_time + self.after_time
+    
+    def to_json(self):
+        return {
+            'initial_rate': self.initial_rate,
+            'outage_rate': self.outage_rate,
+            'new_rate': self.new_rate,
+            'before_time': self.before_time,
+            'notify_time': self.notify_time,
+            'valid': self.valid_time,
+            'after_time': self.after_time
+        }
 
 @dataclass
 class TestCase():
@@ -116,7 +127,7 @@ class TestCase():
                 'video_mpd': self.video.url,
                 'abr': self.abr,
                 'search_method': self.search_method,
-                'network': self.net_condition.summary,
+                'network': self.net_condition.to_json(),
                 'max_buffer': self.max_buffer,
                 'initial_quality': self.initial_quality,
                 'initial_buffer': self.initial_buffer,
@@ -266,6 +277,7 @@ class TestDescription():
 
     def run_tests(self):
         done = 0
+        print(f'0 / {len(self.test_cases)}')
         for test_case in self.test_cases:
             # Set up output directory
             manifest = test_case.manifest()
