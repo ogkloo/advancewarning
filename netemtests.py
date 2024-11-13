@@ -14,9 +14,8 @@ from typing import List, Callable
 import argparse
 import os
 import threading
-
-import zmq
-
+import itertools
+import uuid
 
 DEFAULTS = {
     'format': 'm',
@@ -33,6 +32,278 @@ DEFAULTS = {
     'cushion': 2,
 }
 
+@dataclass
+class RateChangeEvent():
+    new_rate: float
+    duration: float
+
+@dataclass
+class NotifyEvent():
+    notification_time: float
+    outage_duration: float
+    last_valid: float
+
+    start_rate: float
+    outage_rate: float
+    end_rate: float
+
+    def to_string(self):
+        return f'{self.start_rate},{self.outage_rate},{self.end_rate},{self.notification_time},{self.outage_duration},{self.last_valid}'
+
+@dataclass
+class InactiveNotify():
+    event_type: 'str'
+
+
+class NetworkProfile():
+    def __init__(self, initial_rate, outage_rate, new_rate, before_time, notify_time, outage_time, valid_time, after_time):
+        self.summary = f'{initial_rate}, {outage_rate}, {new_rate}, {before_time}, {notify_time}, {outage_time}, {valid_time}, {after_time}'
+        self.initial_rate = initial_rate
+        self.outage_rate = outage_rate
+        self.new_rate = new_rate
+        self.before_time = before_time
+        self.notify_time = notify_time
+        self.outage_time = outage_time
+        self.valid = valid_time
+        self.after_time = after_time
+
+        self.profile = [RateChangeEvent(initial_rate, before_time-notify_time), 
+                        NotifyEvent(notify_time, outage_time, valid_time, initial_rate, outage_rate, new_rate),
+                        RateChangeEvent(initial_rate, notify_time),
+                        RateChangeEvent(outage_rate, outage_time), 
+                        InactiveNotify('stop'),
+                        RateChangeEvent(new_rate, after_time)]
+    
+    def summarize(self):
+        return self.summary
+
+    def get_duration(self):
+        return self.before_time + self.outage_time + self.after_time
+
+@dataclass
+class TestCase():
+    @dataclass
+    class Video():
+        name: str
+        url: str
+
+    video: Video
+    abr: str
+    search_method: str
+    net_condition: List[RateChangeEvent | NotifyEvent | InactiveNotify]
+    max_buffer: float
+    initial_quality: int
+    initial_buffer: float
+    proto: str
+    n: int
+
+    def __init__(self, video_mpd, video_name, abr, search_method, net_condition, max_buffer, initial_quality, initial_buffer, proto, n):
+        self.uuid = uuid.uuid4()
+
+        self.video = self.Video(video_name, video_mpd)
+        self.abr = abr
+        self.search_method = search_method
+        self.net_condition = net_condition
+        self.max_buffer = max_buffer
+        self.initial_quality = initial_quality
+        self.initial_buffer = initial_buffer
+        self.proto = proto
+        self.n = n
+
+    def manifest(self):
+        return {'filename': str(self.uuid),
+                'video_name': self.video.name,
+                'video_mpd': self.video.url,
+                'abr': self.abr,
+                'search_method': self.search_method,
+                'network': self.net_condition.summary,
+                'max_buffer': self.max_buffer,
+                'initial_quality': self.initial_quality,
+                'initial_buffer': self.initial_buffer,
+                'proto': self.proto,
+                'n': self.n}
+
+@dataclass
+class TestDescription():
+    test_cases: List[TestCase]
+
+    # Top level results directory
+    results_dir: str
+
+    # If true, run an iperf test on each unique network profile in the test
+    # set. The results are stored at results_dir/iperf_results_dir.
+    run_iperf_first: bool = False
+    iperf_results_dir: str = 'iperf'
+
+    # Whether or not to write the logs which istream writes to stderr. 
+    # Since these can be quite large, it is recommended to disable them
+    # if filesize is a concern and you won't need detailed log information.
+    write_logs: bool = True
+
+    # Whether or not to overwrite previous tests.
+    overwrite: bool = True
+
+    def mk_test_cases(self, 
+                      videos, 
+                      rates, 
+                      durations, 
+                      notify_times, 
+                      abrs, 
+                      search_methods,
+                      max_buffers, 
+                      initial_qualities, 
+                      initial_buffers, 
+                      protos, 
+                      N):
+        for case in itertools.product(videos,
+                                      rates,
+                                      durations,
+                                      notify_times,
+                                      abrs,
+                                      search_methods,
+                                      max_buffers,
+                                      initial_qualities,
+                                      initial_buffers, 
+                                      protos,
+                                      range(0,N)):
+            video, rate_trio, duration_trio, notification_trio, abr, search_method, max_buffer, initial_quality, initial_buffer, proto, n = case
+            video_url, video_name = video
+            initial_rate, outage_rate, new_rate = rate_trio
+            before_time, outage_time, after_time = duration_trio
+            notify_time, last_valid = notification_trio
+
+            network_conditions = NetworkProfile(initial_rate, 
+                                                outage_rate, 
+                                                new_rate, 
+                                                before_time, 
+                                                notify_time, 
+                                                outage_time, 
+                                                last_valid,
+                                                after_time)
+
+            self.test_cases.append(TestCase(video_url, 
+                                            video_name, 
+                                            abr, 
+                                            search_method,
+                                            network_conditions, 
+                                            max_buffer,
+                                            initial_quality,
+                                            initial_buffer, 
+                                            proto, 
+                                            n))
+            
+            os.makedirs(self.results_dir, exist_ok=True)
+
+    def run_iperf_tests(self):
+        unique_net_profiles = [test_case.net_condition for test_case in self.test_cases]
+        iperf_result_dirname = os.path.join(self.results_dir, self.iperf_results_dir)
+        os.makedirs(iperf_result_dirname, exist_ok=True)
+
+        for profile in unique_net_profiles:
+            result = self.connectivity_test(profile, 'tcp')
+
+            with open(os.path.join(iperf_result_dirname, profile.summarize()), 'w+') as f:
+                f.write(result[0])
+
+    def connectivity_test(  self,
+                            events: NetworkProfile,
+                            proto: str,
+                            iperf_port=DEFAULTS['iperf-port'], 
+                            http_port=DEFAULTS['http-port'], 
+                            cushion=DEFAULTS['cushion'],
+                            quictun_client=DEFAULTS['quictun-client'],
+                            quictun_server=DEFAULTS['quictun-server']
+                            ) -> str:
+        print('Started connectivity test')
+        topo = SingleSwitchTopo(n=2)
+        initial_rate = events.initial_rate
+
+        intf = custom(TCIntf, bw=initial_rate)
+        net = Mininet(topo, intf=intf)
+
+        net.start()
+        h1, h2 = net.get('h1', 'h2')
+        link = net.linksBetween(h1, net.switches[0])[0]
+
+        # Test link behavior using iperf
+        h2.popen('iperf3 -s -p %d &' % iperf_port)
+        print('started iperf')
+
+        if proto == 'quic':
+            quictun_iperf_out = h1.popen(f'{quictun_client} --listen-on tcp:127.0.0.1:6501 --server-endpoint {h2.IP()}:7500 --token tcp:{h2.IP()}:{iperf_port} --insecure-skip-verify True &')
+            sleep(cushion)
+            print('started iperf quictun-client')
+
+        iperf_time = events.get_duration()
+        #print(iperf_time)
+
+        if proto == 'quic':
+            quic_iperf_client = h1.popen(f'iperf3 -c 127.0.0.1 -p 6501 -t {iperf_time} -f m -i 0.1')
+        
+        if proto == 'tcp':
+            tcp_iperf_client = h1.popen(f'iperf3 -c {h2.IP()} -p {iperf_port} -t {iperf_time} -f m -i 0.1')
+
+        rate_change_worker(events, link, h1)
+
+        # Clean up
+        if proto == 'quic':
+            quic_iperf_out = [stream.decode('utf-8') for stream in quic_iperf_client.communicate()]
+            print('QUIC iperf done')
+
+        if proto == 'tcp':
+            tcp_iperf_out = [stream.decode('utf-8') for stream in tcp_iperf_client.communicate()]
+            print('TCP iperf done')
+
+        sleep(cushion)
+
+        h2.cmd('pkill iperf3')
+        net.stop()
+
+        if proto == 'tcp':
+            return tcp_iperf_out
+        else:
+            return quic_iperf_out
+
+    def run_tests(self):
+        done = 0
+        for test_case in self.test_cases:
+            # Set up output directory
+            manifest = test_case.manifest()
+            result_dirname = os.path.join(self.results_dir, str(test_case.uuid))
+            print(result_dirname)
+            os.makedirs(result_dirname, exist_ok=True)
+
+            # Run test
+            header, results, logs = abr_test(test_case.net_condition.profile[0].new_rate, 
+                                            test_case.net_condition, 
+                                            test_case.video.url, 
+                                            test_case.abr, 
+                                            test_case.max_buffer, 
+                                            test_case.search_method, 
+                                            test_case.initial_quality, 
+                                            test_case.initial_buffer, 
+                                            test_case.proto)
+
+            # Write results
+            with open(os.path.join(result_dirname, 'header.txt'), 'w+') as header_file:
+                header_file.write(header)
+
+            with open(os.path.join(result_dirname, 'results.json'), 'w+') as results_file:
+                json.dump(results, results_file)
+
+            if self.write_logs:
+                with open(os.path.join(result_dirname, 'logs.txt'), 'w+') as log_file:
+                    log_file.write(logs)
+            
+            with open(os.path.join(result_dirname, 'manifest.json'), 'w+') as manifest_file:
+                json.dump(manifest, manifest_file)
+            
+            done += 1
+            if done % 10 == 0:
+                print(f'{done} / {len(self.test_cases)}')
+    
+
+
 class IStreamError(BaseException):
     pass
 
@@ -45,47 +316,31 @@ class SingleSwitchTopo(Topo):
             host = self.addHost('h%s' % (h + 1))
             self.addLink(host, switch)
 
-def rate_change_worker(events, link, client_host):
+def rate_change_worker(network_profile, link, client_host):
     #link.intf1.bwParamMax = 4000
     print(f'modifiying link: {link}')
     def sleep_worker():
-        # Different event types? How to mark event types?
-        for event_type, event in events:
-            print(event_type)
-            if event_type == 'change':
-                new_rate, duration = event
-                # Prevent anything stupid happening if we want to remove the blockage or something
-                # This is here bc mk_blockage isn't really up to speed
-                if duration > 0:
-                    print(f'event started: {event}')
-                    link.intf1.config(bw=new_rate)
-                    sleep(duration)
-                    print(f'event finished: {event}')
-            elif event_type == 'notify':
-                print(f'notification received: {event}')
-                old_rate, new_rate, time_to_event, duration, last_valid = event
-                notifier_bin = DEFAULTS['notifier']
-                # .communicate is basically an await in this context
-                client_out = client_host.popen(f'{notifier_bin} -m {old_rate},{new_rate},{time_to_event},{duration},{last_valid}')
-                sleep(time_to_event)
-            elif event_type == 'start':
-                print(f'notification received: EVENT_START')
-                notifier_bin = DEFAULTS['notifier']
-                # .communicate is basically an await in this context
-                client_out = client_host.popen(f'{notifier_bin} --start')
-            elif event_type == 'stop':
-                print(f'notification received: EVENT_STOP')
-                notifier_bin = DEFAULTS['notifier']
-                # .communicate is basically an await in this context
-                client_out = client_host.popen(f'{notifier_bin} --stop')
-    
+        notifier_bin = DEFAULTS['notifier']
+        for event in network_profile.profile:
+            if type(event) == RateChangeEvent:
+                #print(f'rate change: {event.new_rate}, {event.duration}')
+                link.intf1.config(bw=event.new_rate)
+                sleep(event.duration)
+            elif type(event) == NotifyEvent:
+                #print(f'notification: -m {event.to_string()}')
+                client_out = client_host.popen(f'{notifier_bin} -m {event.to_string()}')
+                sleep(event.notification_time)
+            elif type(event) == InactiveNotify:
+                #print(f'notification: --{event.event_type}')
+                client_out = client_host.popen(f'{notifier_bin} --{event.event_type}')
+                
     thread = threading.Thread(target=sleep_worker)
     thread.start()
 
 def connectivity_test(initial_rate: int,
-                      events: list[tuple[str, int, float]],
+                      events: NetworkProfile,
                       video: str, 
-                      proto='QUIC',
+                      proto='TCP',
                       iperf_port=DEFAULTS['iperf-port'], 
                       http_port=DEFAULTS['http-port'], 
                       cushion=DEFAULTS['cushion'],
@@ -176,11 +431,11 @@ def abr_test(initial_rate: int,
             events: list[tuple[int, float]], 
             video: str, 
             abr_strategy: str, 
-            max_buffer=1.0,
-            search_method='exhaustive',
-            initial_quality=None,
-            initial_buffer=None,
-            proto='QUIC',
+            max_buffer: float,
+            search_method: str,
+            initial_quality: int | None,
+            initial_buffer: float | None,
+            proto: str,
             server_port=DEFAULTS['http-port'], 
             cushion=DEFAULTS['cushion'],
             istream=DEFAULTS['istream'],
@@ -237,23 +492,21 @@ def abr_test(initial_rate: int,
             istream_client = h1.popen(
                 f'{istream} --mod_downloader tcp -i http://{h2.IP()}:{server_port}/{video} --mod_abr {abr_strategy} --max_buffer {max_buffer} --search_method {search_method}')
 
-    print(f'istream started with {abr}')
+    print(f'istream started with {abr_strategy}')
     #print('started istream player')
 
     #sleep(cushion)
     print('link:', link.intf1)
     rate_change_worker(events, link, h1)
 
-    print('rate change sequence done')
-
     # Wait to avoid anything breaking
     #sleep(cushion)
 
-    print('await results')
+    #print('await results')
     error_trace = istream_client.communicate()[1].decode('utf-8')
     results = istream_client.communicate()[0].decode('utf-8')
 
-    print('called in results')
+    print('test finished')
     
     h2.popen('killall http-server')
     h1.popen('killall iplay')
@@ -364,16 +617,18 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.video_names is not None:
-        video_mpds: List[str] = zip(args.video, args.video_names)
+        videos: List[str] = zip(args.video, args.video_names)
     elif args.video is not None:
         video_names = map(lambda video_path: os.path.basename(os.path.dirname(video_path)), args.video)
-        video_mpds = list(zip(args.video, video_names))
+        videos = list(zip(args.video, video_names))
     
 
     results_format: str = args.format
     test_first: bool = args.connectivity_test
     istream: str = args.istream
     results_dir: str = args.results 
+
+    # Network test settings
     use_tcp: bool = args.tcp
     both: bool = args.both
     use_quic: bool = True
@@ -384,28 +639,66 @@ if __name__ == '__main__':
 
     # Mininet log level
     setLogLevel('error')
+    iperf_tests = TestDescription([], results_dir)
 
+    iperf_tests.mk_test_cases(videos=videos, 
+                        rates=[(300, 100, 200), 
+                               (300, 200, 200), 
+                               (300, 0.00001, 100)], 
+                        durations=[(10, 0.5, 20),
+                                   (10, 0.75, 20),
+                                   (10, 1.0, 20)], 
+                        notify_times=[(1,1)], 
+                        abrs=[None],
+                        search_methods=['none'], 
+                        max_buffers=[None],
+                        initial_qualities=[None], 
+                        initial_buffers=[None], 
+                        protos=['tcp'], 
+                        N=1)
 
-    #blockages = [0.15, 0.25, 0.5, 1, 2]
+    #iperf_tests.run_iperf_tests()
 
-    test_baseline = False 
-    max_buffer = 1.0
-    initial_buffers = [None]
-    initial_qualities = [None]
-    #abrs = ['bandwidth', 'lol', 'buffer', 'hybrid']
-    search_method = 'exhaustive'
-    #abrs = ['fixed']
-    abrs = ['bandwidth']
+    tests = TestDescription([], results_dir)
 
-    # Normal operation rates
-    rate_pairs = [(600, 400), (300, 100), (200, 100), (100, 50)]
-    #mitigation_duration
-    #outage_times = [(0.00001, 1.0), (50, 1.0), (100, 1.0)]
-    #outage_times = [(0.00001, 0.5), (0.00001, 0.75), (0.00001, 1.0)]
-    outage_times = [(0.00001, 1.0)]
+    '''
+    tests.mk_test_cases(videos=videos, 
+                        rates=[(300, 100, 200), 
+                               (300, 200, 200), 
+                               (300, 0.00001, 100)], 
+                        durations=[(10, 0.5, 20),
+                                   (10, 0.75, 20),
+                                   (10, 1.0, 20)], 
+                        notify_times=[(1,1), (5, 5)], 
+                        abrs=['bandwidth', 'lol', 'hybrid', 'buffer'], 
+                        search_methods=['none', 'greedy'], 
+                        max_buffers=[1.0, 1.5, 2.0], 
+                        initial_qualities=[None], 
+                        initial_buffers=[None], 
+                        protos=['tcp'], 
+                        N=1)
+    '''
+    tests.mk_test_cases(videos=videos, 
+                        rates=[(300, 0.00001, 100)], 
+                        durations=[(10, 0.5, 20),
+                                   (10, 0.75, 20),
+                                   (10, 1.0, 20)], 
+                        notify_times=[(1,1), (5, 5)], 
+                        abrs=['bandwidth', 'lol', 'hybrid', 'buffer'], 
+                        search_methods=['none', 'greedy'], 
+                        max_buffers=[1.0, 1.5, 2.0], 
+                        initial_qualities=[None], 
+                        initial_buffers=[None], 
+                        protos=['tcp'], 
+                        N=1)
 
-    print(video_mpds, video_mpds[0][0])
+    tests.write_logs = False
 
+    tests.run_tests()
+
+    exit()
+
+'''
     if test_first:
         for initial_rate, new_rate in rate_pairs:
             print(initial_rate, new_rate)
@@ -451,9 +744,9 @@ if __name__ == '__main__':
 
         exit()
 
-
-
     # TODO: Estimate overhead from iperf test ahead of time
+
+    #TestDescription(results_dir, video_mpds, abrs, None, None, False, True, map(mk_blockage()))
 
     # Bandwidth events
     for video_mpd, video_name in video_mpds:
@@ -559,3 +852,4 @@ if __name__ == '__main__':
                                         f.write(json.dumps(results_normal))
                                     with open(logs_normal_filename, 'w+') as f:
                                         f.write(logs_normal)
+        '''
