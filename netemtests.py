@@ -58,6 +58,7 @@ class InactiveNotify():
 class NetworkProfile():
     def __init__(self, initial_rate, outage_rate, new_rate, before_time, notify_time, outage_time, valid_time, after_time):
         self.summary = f'{initial_rate}, {outage_rate}, {new_rate}, {before_time}, {notify_time}, {outage_time}, {valid_time}, {after_time}'
+
         self.initial_rate = initial_rate
         self.outage_rate = outage_rate
         self.new_rate = new_rate
@@ -87,6 +88,7 @@ class NetworkProfile():
             'new_rate': self.new_rate,
             'before_time': self.before_time,
             'notify_time': self.notify_time,
+            'outage_time': self.outage_time,
             'valid': self.valid_time,
             'after_time': self.after_time
         }
