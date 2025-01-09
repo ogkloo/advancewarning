@@ -1,0 +1,2 @@
+mininet==2.3.0.dev6
+pyzmq==26.2.0
