@@ -212,19 +212,20 @@ class TestDescription():
             os.makedirs(self.results_dir, exist_ok=True)
 
     def run_iperf_tests(self):
-        unique_net_profiles = [test_case.net_condition for test_case in self.test_cases]
+        unique_net_profiles = [(test_case.net_condition, test_case.proto) for test_case in self.test_cases]
         iperf_result_dirname = os.path.join(self.results_dir, self.iperf_results_dir)
         os.makedirs(iperf_result_dirname, exist_ok=True)
 
-        for profile in unique_net_profiles:
-            result = self.connectivity_test(profile, 'tcp')
+        for (profile, proto) in unique_net_profiles:
+            result = self.connectivity_test(profile, proto, interval=0.5)
 
-            with open(os.path.join(iperf_result_dirname, profile.summarize()), 'w+') as f:
+            with open(os.path.join(iperf_result_dirname, profile.summarize()+proto), 'w+') as f:
                 f.write(result[0])
 
     def connectivity_test(  self,
                             events: NetworkProfile,
                             proto: str,
+                            interval=0.1,
                             iperf_port=DEFAULTS['iperf-port'], 
                             http_port=DEFAULTS['http-port'], 
                             cushion=DEFAULTS['cushion'],
@@ -244,9 +245,10 @@ class TestDescription():
 
         # Test link behavior using iperf
         h2.popen('iperf3 -s -p %d &' % iperf_port)
-        print('started iperf')
 
         if proto == 'quic':
+            quictun_server_out = h2.popen(f'{quictun_server} --listen-on {h2.IP()}:7500 &')
+            sleep(cushion)
             quictun_iperf_out = h1.popen(f'{quictun_client} --listen-on tcp:127.0.0.1:6501 --server-endpoint {h2.IP()}:7500 --token tcp:{h2.IP()}:{iperf_port} --insecure-skip-verify True &')
             sleep(cushion)
             print('started iperf quictun-client')
@@ -255,10 +257,11 @@ class TestDescription():
         #print(iperf_time)
 
         if proto == 'quic':
-            quic_iperf_client = h1.popen(f'iperf3 -c 127.0.0.1 -p 6501 -t {iperf_time} -f m -i 0.1')
+            print('quic iperf')
+            quic_iperf_client = h1.popen(f'iperf3 -c 127.0.0.1 -p 6501 -t {iperf_time} -f m -i {interval}')
         
         if proto == 'tcp':
-            tcp_iperf_client = h1.popen(f'iperf3 -c {h2.IP()} -p {iperf_port} -t {iperf_time} -f m -i 0.1')
+            tcp_iperf_client = h1.popen(f'iperf3 -c {h2.IP()} -p {iperf_port} -t {iperf_time} -f m -i {interval}')
 
         rate_change_worker(events, link, h1)
 
@@ -383,6 +386,7 @@ def connectivity_test(initial_rate: int,
 
     # Start QUICtun
     if proto == 'QUIC':
+        print('quictun server')
         quictun_server_out = h2.popen(f'{quictun_server} --listen-on {h2.IP()}:7500 &')
 
     # Http-server
@@ -656,215 +660,108 @@ if __name__ == '__main__':
 
     # Mininet log level
     setLogLevel('error')
-    iperf_tests = TestDescription([], results_dir)
 
-    iperf_tests.mk_test_cases(videos=videos, 
-                        rates=[(300, 100, 200), 
-                               (300, 200, 200), 
-                               (300, 0.00001, 100)], 
-                        durations=[(10, 0.5, 20),
-                                   (10, 0.75, 20),
-                                   (10, 1.0, 20)], 
-                        notify_times=[(1,1)], 
-                        abrs=[None],
-                        search_methods=['greedy'], 
-                        max_buffers=[None],
+    #buffer_level = TestDescription([], os.path.join(results_dir, 'delta_buffer'))
+
+    #buffer_level.mk_test_cases(videos=videos, 
+    #                    rates=[(300, 50, 50)],
+    #                    durations=[(10, 2.0, 20)],
+    #                    notify_times=[(3.0, 2.0)], 
+    #                    abrs=['bandwidth'], 
+    #                    search_methods=['none', 'greedy'], 
+    #                    max_buffers=[1.5, 2.0, 2.5, 3.0], 
+    #                    initial_qualities=[None], 
+    #                    initial_buffers=[None], 
+    #                    protos=['tcp', 'quic'], 
+    #                    N=1)
+
+    #buffer_level.write_logs = False
+    #buffer_level.write_headers = False
+
+    #print('init', len(buffer_level.test_cases))
+    #buffer_level.run_tests()
+
+    # buffer_level = TestDescription([], os.path.join(results_dir, 'delta_buffer2'))
+
+    # buffer_level.mk_test_cases(videos=videos, 
+    #                     rates=[(300, 50, 50)],
+    #                     durations=[(10, 1.0, 20)],
+    #                     notify_times=[(3.0, 2.0)], 
+    #                     abrs=['lol', 'buffer'], 
+    #                     search_methods=['none', 'greedy'], 
+    #                     max_buffers=[2.0, 3.0, 4.0, 5.0], 
+    #                     initial_qualities=[None], 
+    #                     initial_buffers=[None], 
+    #                     protos=['QUIC'], 
+    #                     N=1)
+
+    # buffer_level.write_logs = False
+    # buffer_level.write_headers = False
+
+
+    # 1, 2, 3, 4
+
+    initial_rate = TestDescription([], os.path.join(results_dir, 'delta-t'))
+
+    initial_rate.mk_test_cases(videos=videos, 
+                        rates=[(200, 50, 50)],
+                        durations=[(10, 1.0, 20.0)],
+                        notify_times=[(3.0, 6.0)], 
+                        abrs=['bandwidth'], 
+                        search_methods=['none', 'greedy'], 
+                        max_buffers=[3.0], 
                         initial_qualities=[None], 
                         initial_buffers=[None], 
                         protos=['tcp'], 
                         N=1)
 
-    #iperf_tests.run_iperf_tests()
+    initial_rate.write_logs = False
+    initial_rate.write_headers = False
 
-    tests = TestDescription([], results_dir)
+    #print('initial-rate-delta-t', len(initial_rate.test_cases))
+    #print('delta_buffer-2', len(buffer_level.test_cases))
+    #initial_rate.run_tests()
+    # buffer_level.run_te
 
-    '''
-    tests.mk_test_cases(videos=videos, 
-                        rates=[(300, 100, 200), 
-                               (300, 200, 200), 
-                               (300, 0.00001, 100)], 
-                        durations=[(10, 0.5, 20),
-                                   (10, 0.75, 20),
-                                   (10, 1.0, 20)], 
-                        notify_times=[(1,1), (5, 5)], 
-                        abrs=['bandwidth', 'lol', 'hybrid', 'buffer'], 
+    #delta_t_bw = TestDescription([], os.path.join(results_dir, 'delta-t-bw'))
+
+    #delta_t_bw.mk_test_cases(videos=videos, 
+    #                    rates=[(300, 50, 300)],
+    #                    durations=[(10, 3.0, 20.0), (10, 4.0, 20.0)],
+    #                    notify_times=[(3.0, 6.0)], 
+    #                    abrs=['bandwidth'], 
+    #                    search_methods=['none', 'greedy'], 
+    #                    max_buffers=[3.0], 
+    #                    initial_qualities=[None], 
+    #                    initial_buffers=[None], 
+    #                    protos=['tcp'], 
+    #                    N=1)
+
+    #delta_t_bw.write_logs = False
+    #delta_t_bw.write_headers = False
+
+    #print('initial-rate-delta-t', len(delta_t_bw.test_cases))
+    ##print('delta_buffer-2', len(buffer_level.test_cases))
+    #delta_t_bw.run_tests()
+
+
+    scen2 = TestDescription([], os.path.join(results_dir, '600scen2-batch2'))
+
+    scen2.mk_test_cases(videos=videos, 
+                        rates=[(500, 50, 50)],
+                        durations=[(10, 1.0, 20.0), (10, 2.0, 20.0), (10, 3.0, 20.0), (10, 4.0, 20.0)],
+                        notify_times=[(3.0, 6.0)], 
+                        abrs=['bandwidth', 'lol', 'buffer'], 
                         search_methods=['none', 'greedy'], 
-                        max_buffers=[1.0, 1.5, 2.0], 
+                        max_buffers=[3.0], 
                         initial_qualities=[None], 
                         initial_buffers=[None], 
                         protos=['tcp'], 
                         N=1)
-    '''
-    tests.mk_test_cases(videos=videos, 
-                        rates=[(300, 50, 50)], 
-                        durations=[(10, 1.0, 20)], 
-                        notify_times=[(x,2) for x in range(1, 6)], 
-                        abrs=['fixed'], 
-                        search_methods=['none', 'greedy'], 
-                        max_buffers=[1.5, 2.0], 
-                        initial_qualities=[4], 
-                        initial_buffers=[1.0], 
-                        protos=['quic'], 
-                        N=1)
 
-    tests.write_logs = False
+    scen2.write_logs = False
+    scen2.write_headers = False
 
-    tests.run_tests()
-
-    exit()
-
-'''
-    if test_first:
-        for initial_rate, new_rate in rate_pairs:
-            print(initial_rate, new_rate)
-            blockage = {'rate1': initial_rate, 
-                        'rate2': new_rate, 
-                        'before_time': 5, 
-                        'outage_time': 0, 
-                        'outage_rate_multiplier': 1, 
-                        'after_time': 10}
-
-            #notification = {'notify_time': 1, 'valid_time': 1, 'overhead1': 0.15, 'overhead2': 0.15}
-            notification = None
-
-            network_event = mk_blockage(blockage, notification)
-
-            if  use_tcp:
-                tcp_curl, tcp_iperf = connectivity_test(initial_rate, network_event, video_mpds[0][0], proto='TCP')
-            if use_quic:
-                quic_curl, quic_iperf = connectivity_test(initial_rate, network_event, video_mpds[0][0], proto='QUIC')
-
-            # Directory stuff
-            test_results_dir = os.path.join(results_dir, DEFAULTS['connectivity_results_dir'])
-            if not os.path.exists(test_results_dir):
-                os.makedirs(test_results_dir)
-
-            if use_tcp:
-                for stream in tcp_iperf:
-                    if len(stream) > 0:
-                        with open(os.path.join(test_results_dir, f'iperf-tcp-{initial_rate}-{new_rate}.txt'), 'w+') as iperf_file:
-                            iperf_file.write(stream)
-                if debug:
-                    for stream in tcp_curl:
-                        print(stream)
-            if use_quic:
-                for stream in quic_iperf:
-                    if len(stream) > 0:
-                        with open(os.path.join(test_results_dir, f'iperf-quic-{initial_rate}-{new_rate}.txt'), 'w+') as iperf_file:
-                            iperf_file.write(stream)
-                if debug:
-                    for stream in quic_curl:
-                        print(stream)
-            cleanup()
-
-        exit()
-
-    # TODO: Estimate overhead from iperf test ahead of time
-
-    #TestDescription(results_dir, video_mpds, abrs, None, None, False, True, map(mk_blockage()))
-
-    # Bandwidth events
-    for video_mpd, video_name in video_mpds:
-        for initial_rate, new_rate in rate_pairs:
-            for outage_rate, outage_time in outage_times:
-                notification = {'notify_time': 5, 
-                                'valid_time': 1, 
-                                'overhead1': 0.05, 
-                                'overhead2': 0.05}
-                blockage = {'rate1': initial_rate, 
-                            'rate2': new_rate, 
-                            'outage_time': outage_time,
-                            'outage_rate': outage_rate * initial_rate,
-                            'before_time': 10,
-                            'after_time': 5}
-
-                events = mk_blockage(blockage, notification)
-                events_no_notify = mk_blockage(blockage, notification=None)
-
-                # Results directory management
-                rendered_outage_rate = outage_rate
-                if outage_rate < 1:
-                    rendered_outage_rate = 0
-
-                out_dir = f'{results_dir}/{video_name}/{outage_time}-{rendered_outage_rate}-{max_buffer + 0.5}-{initial_rate}-{new_rate}'
-                if not os.path.exists(out_dir):
-                    os.makedirs(out_dir)
-                print(f'{out_dir=}, {results_dir=}, {video_name=}')
-
-                N = 1
-
-                # Run tests over each ABR method
-                for initial_buffer in initial_buffers:
-                    for initial_quality in initial_qualities:
-                        for n in range(0, N):
-                            for abr in abrs:
-
-                                if initial_buffer is not None:
-                                    abr_dirname = os.path.join(out_dir, f'{initial_buffer}-{initial_quality}-{abr}-{n}')
-                                    if test_baseline:
-                                        abr_dirname_normal = os.path.join(out_dir, f'no-notify-{abr}-{n}')
-                                else:
-                                    abr_dirname = os.path.join(out_dir, f'{abr}-{n}')
-                                    if test_baseline:
-                                        abr_dirname_normal = os.path.join(out_dir, f'no-notify-{abr}-{n}')
-
-                                if not os.path.exists(abr_dirname):
-                                    os.mkdir(abr_dirname)
-
-                                if test_baseline:
-                                    if not os.path.exists(abr_dirname_normal):
-                                        os.mkdir(abr_dirname_normal)
-
-                                header_filename = os.path.join(abr_dirname, 'header.txt')
-                                results_filename = os.path.join(abr_dirname, 'results.json')
-                                logs_filename = os.path.join(abr_dirname, 'logs.txt')
-
-                                if test_baseline:
-                                    header_normal_filename = os.path.join(abr_dirname_normal, 'header.txt')
-                                    results_normal_filename = os.path.join(abr_dirname_normal, 'results.json')
-                                    logs_normal_filename = os.path.join(abr_dirname_normal, 'logs.txt')
-
-                                if outage_time < 2.0:
-                                    header, results, logs = abr_test(initial_rate, 
-                                                                    events, 
-                                                                    video_mpd, 
-                                                                    'fixed', 
-                                                                    search_method=search_method,
-                                                                    max_buffer=max_buffer,
-                                                                    initial_buffer=1.0, 
-                                                                    initial_quality=3, 
-                                                                    proto='TCP', 
-                                                                    istream=istream)
-
-                                    cleanup()
-
-                                if test_baseline:
-                                    header_normal, results_normal, logs_normal = abr_test(initial_rate, 
-                                                                                        events_no_notify, 
-                                                                                        video_mpd, 
-                                                                                        abr, 
-                                                                                        max_buffer=max_buffer,
-                                                                                        initial_buffer=initial_buffer, 
-                                                                                        initial_quality=initial_quality, 
-                                                                                        proto='TCP', 
-                                                                                        istream=istream)
-
-                                    cleanup()
-
-                                if outage_time < 2.0:
-                                    with open(header_filename, 'w+') as f:
-                                        f.write(header)
-                                    with open(results_filename, 'w+') as f:
-                                        f.write(json.dumps(results))
-                                    with open(logs_filename, 'w+') as f:
-                                        f.write(logs)
-
-                                if test_baseline:
-                                    print('writing')
-                                    with open(header_normal_filename, 'w+') as f:
-                                        f.write(header_normal)
-                                    with open(results_normal_filename, 'w+') as f:
-                                        f.write(json.dumps(results_normal))
-                                    with open(logs_normal_filename, 'w+') as f:
-                                        f.write(logs_normal)
-        '''
+    print('initial-rate-delta-t', len(scen2.test_cases))
+    #print('delta_buffer-2', len(buffer_level.test_cases))
+    scen2.run_tests()
