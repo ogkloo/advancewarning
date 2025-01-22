@@ -4,7 +4,7 @@
 ./istream-player/build.sh 1> /dev/null
 
 # Run test
-http-server -p 8080 videos/runner 2> /dev/null &
+http-server -p 8080 ./videos/runner 2> /dev/null &
 server_pid=$!
 
 ./istream-player/istream \

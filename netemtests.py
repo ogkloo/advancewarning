@@ -701,67 +701,39 @@ if __name__ == '__main__':
 
     # 1, 2, 3, 4
 
-    initial_rate = TestDescription([], os.path.join(results_dir, 'delta-t'))
+    scen1 = TestDescription([], os.path.join(results_dir, 'pensieve-scen1'))
 
-    initial_rate.mk_test_cases(videos=videos, 
-                        rates=[(200, 50, 50)],
-                        durations=[(10, 1.0, 20.0)],
+    scen1.mk_test_cases(videos=videos, 
+                        rates=[(200, 50, 200)],
+                        durations=[(10, 1.0, 20.0), (10, 1.0, 20.0), (10, 2.0, 20.0), (10, 3.0, 20.0), (10, 4.0, 20.0)],
                         notify_times=[(3.0, 6.0)], 
-                        abrs=['bandwidth'], 
-                        search_methods=['none', 'greedy'], 
+                        abrs=['pensieve'], 
+                        search_methods=['none'], 
                         max_buffers=[3.0], 
                         initial_qualities=[None], 
                         initial_buffers=[None], 
                         protos=['tcp'], 
-                        N=1)
+                        N=2)
 
-    initial_rate.write_logs = False
-    initial_rate.write_headers = False
+    scen1.write_logs = False
+    scen1.write_headers = False
 
-    #print('initial-rate-delta-t', len(initial_rate.test_cases))
-    #print('delta_buffer-2', len(buffer_level.test_cases))
-    #initial_rate.run_tests()
-    # buffer_level.run_te
-
-    #delta_t_bw = TestDescription([], os.path.join(results_dir, 'delta-t-bw'))
-
-    #delta_t_bw.mk_test_cases(videos=videos, 
-    #                    rates=[(300, 50, 300)],
-    #                    durations=[(10, 3.0, 20.0), (10, 4.0, 20.0)],
-    #                    notify_times=[(3.0, 6.0)], 
-    #                    abrs=['bandwidth'], 
-    #                    search_methods=['none', 'greedy'], 
-    #                    max_buffers=[3.0], 
-    #                    initial_qualities=[None], 
-    #                    initial_buffers=[None], 
-    #                    protos=['tcp'], 
-    #                    N=1)
-
-    #delta_t_bw.write_logs = False
-    #delta_t_bw.write_headers = False
-
-    #print('initial-rate-delta-t', len(delta_t_bw.test_cases))
-    ##print('delta_buffer-2', len(buffer_level.test_cases))
-    #delta_t_bw.run_tests()
-
-
-    scen2 = TestDescription([], os.path.join(results_dir, '600scen2-batch2'))
+    scen2 = TestDescription([], os.path.join(results_dir, 'pensieve-scen2'))
 
     scen2.mk_test_cases(videos=videos, 
-                        rates=[(500, 50, 50)],
+                        rates=[(200, 50, 50)],
                         durations=[(10, 1.0, 20.0), (10, 2.0, 20.0), (10, 3.0, 20.0), (10, 4.0, 20.0)],
                         notify_times=[(3.0, 6.0)], 
-                        abrs=['bandwidth', 'lol', 'buffer'], 
-                        search_methods=['none', 'greedy'], 
+                        abrs=['pensieve'], 
+                        search_methods=['none'], 
                         max_buffers=[3.0], 
                         initial_qualities=[None], 
                         initial_buffers=[None], 
                         protos=['tcp'], 
-                        N=1)
+                        N=2)
 
     scen2.write_logs = False
     scen2.write_headers = False
 
-    print('initial-rate-delta-t', len(scen2.test_cases))
-    #print('delta_buffer-2', len(buffer_level.test_cases))
+    scen1.run_tests()
     scen2.run_tests()
