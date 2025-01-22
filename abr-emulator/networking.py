@@ -1,0 +1,146 @@
+import threading
+
+from mininet.topo import Topo
+
+from dataclasses import dataclass
+from time import sleep
+
+from config import DEFAULTS
+
+@dataclass
+class RateChangeEvent():
+    new_rate: float
+    duration: float
+
+@dataclass
+class NotifyEvent():
+    notification_time: float
+    outage_duration: float
+    last_valid: float
+
+    start_rate: float
+    outage_rate: float
+    end_rate: float
+
+    def to_string(self):
+        return f'{self.start_rate},{self.outage_rate},{self.end_rate},{self.notification_time},{self.outage_duration},{self.last_valid}'
+
+@dataclass
+class InactiveNotify():
+    event_type: 'str'
+
+class NetworkProfile():
+    def __init__(self, initial_rate, outage_rate, new_rate, before_time, notify_time, outage_time, valid_time, after_time):
+        self.summary = f'{initial_rate}, {outage_rate}, {new_rate}, {before_time}, {notify_time}, {outage_time}, {valid_time}, {after_time}'
+
+        self.initial_rate = initial_rate
+        self.outage_rate = outage_rate
+        self.new_rate = new_rate
+        self.before_time = before_time
+        self.notify_time = notify_time
+        self.outage_time = outage_time
+        self.valid = valid_time
+        self.after_time = after_time
+
+        self.profile = [RateChangeEvent(initial_rate, before_time-notify_time), 
+                        NotifyEvent(notify_time, outage_time, valid_time, initial_rate, outage_rate, new_rate),
+                        RateChangeEvent(initial_rate, notify_time),
+                        RateChangeEvent(outage_rate, outage_time), 
+                        InactiveNotify('stop'),
+                        RateChangeEvent(new_rate, after_time)]
+    
+    def summarize(self):
+        return self.summary
+
+    def get_duration(self):
+        return self.before_time + self.outage_time + self.after_time
+    
+    def to_json(self):
+        return {
+            'initial_rate': self.initial_rate,
+            'outage_rate': self.outage_rate,
+            'new_rate': self.new_rate,
+            'before_time': self.before_time,
+            'notify_time': self.notify_time,
+            'outage_time': self.outage_time,
+            'valid': self.valid,
+            'after_time': self.after_time
+        }
+
+class SingleSwitchTopo(Topo):
+    'Single switch connected to n hosts.'
+    def build(self, n=2):
+        switch = self.addSwitch('s1')
+        # Python's range(N) generates 0..N-1
+        for h in range(n):
+            host = self.addHost('h%s' % (h + 1))
+            self.addLink(host, switch)
+
+class NetworkDomain():
+    def __init__(self, switch, servers, clients):
+        self.switch = switch
+        self.servers = servers
+        self.clients = clients
+
+class MultiSwitchServerClient(Topo):
+    def __init__(self, domains):
+        self.domains = []
+
+        # Each domain contains a list of pairs of (num_servers, num_clients)
+        for i in range(len(domains)):
+            num_servers, num_clients = domains[i]
+            switch = self.addSwitch(f'switch-{i}')
+
+            servers = []
+            for server_number in range(num_servers):
+                server = self.addHost(f'server-{server_number}')
+                self.addLink(server, switch)
+                servers.append(server)
+
+            clients = []
+            for client_number in range(num_clients):
+                client = self.addHost(f'server-{client_number}')
+                self.addLink(client, switch)
+                clients.append(client)
+            
+            domain = NetworkDomain(switch, servers, clients)
+            self.domains.append(domain)
+        
+    def run_on_domain(self, domain_number, server_commands, client_commands):
+        domain = self.domains[domain_number]
+
+        server_processes = []
+        for server in domain.servers:
+            for command in server_commands:
+                process = server.popen(command)
+                server_processes.append(process)
+
+        client_processes = []
+        for client in domain.clients:
+            for command in client_commands:
+                process = client.popen(command)
+                client_processes.append(process)
+        
+        # Call communicate on these
+        return (server_processes, client_processes)
+
+def rate_change_worker(network_profile, link, client_host):
+    #link.intf1.bwParamMax = 4000
+    #print(f'modifiying link: {link}')
+    def sleep_worker():
+        notifier_bin = DEFAULTS['notifier']
+        for event in network_profile.profile:
+            if type(event) == RateChangeEvent:
+                #print(f'rate change: {event.new_rate}, {event.duration}')
+                link.intf1.config(bw=event.new_rate)
+                sleep(event.duration)
+            elif type(event) == NotifyEvent:
+                #print(f'notification: -m {event.to_string()}')
+                client_out = client_host.popen(f'{notifier_bin} -m {event.to_string()}')
+                sleep(event.notification_time)
+            elif type(event) == InactiveNotify:
+                #print(f'notification: --{event.event_type}')
+                client_out = client_host.popen(f'{notifier_bin} --{event.event_type}')
+                
+    thread = threading.Thread(target=sleep_worker)
+    thread.start()
