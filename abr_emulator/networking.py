@@ -1,11 +1,12 @@
 import threading
 
 from mininet.topo import Topo
+from mininet.net import Mininet
 
 from dataclasses import dataclass
 from time import sleep
 
-from config import DEFAULTS
+from .config import DEFAULTS
 
 @dataclass
 class RateChangeEvent():
@@ -67,63 +68,6 @@ class NetworkProfile():
             'after_time': self.after_time
         }
 
-class SingleSwitchTopo(Topo):
-    'Single switch connected to n hosts.'
-    def build(self, n=2):
-        switch = self.addSwitch('s1')
-        # Python's range(N) generates 0..N-1
-        for h in range(n):
-            host = self.addHost('h%s' % (h + 1))
-            self.addLink(host, switch)
-
-class NetworkDomain():
-    def __init__(self, switch, servers, clients):
-        self.switch = switch
-        self.servers = servers
-        self.clients = clients
-
-class MultiSwitchServerClient(Topo):
-    def __init__(self, domains):
-        self.domains = []
-
-        # Each domain contains a list of pairs of (num_servers, num_clients)
-        for i in range(len(domains)):
-            num_servers, num_clients = domains[i]
-            switch = self.addSwitch(f'switch-{i}')
-
-            servers = []
-            for server_number in range(num_servers):
-                server = self.addHost(f'server-{server_number}')
-                self.addLink(server, switch)
-                servers.append(server)
-
-            clients = []
-            for client_number in range(num_clients):
-                client = self.addHost(f'server-{client_number}')
-                self.addLink(client, switch)
-                clients.append(client)
-            
-            domain = NetworkDomain(switch, servers, clients)
-            self.domains.append(domain)
-        
-    def run_on_domain(self, domain_number, server_commands, client_commands):
-        domain = self.domains[domain_number]
-
-        server_processes = []
-        for server in domain.servers:
-            for command in server_commands:
-                process = server.popen(command)
-                server_processes.append(process)
-
-        client_processes = []
-        for client in domain.clients:
-            for command in client_commands:
-                process = client.popen(command)
-                client_processes.append(process)
-        
-        # Call communicate on these
-        return (server_processes, client_processes)
-
 def rate_change_worker(network_profile, link, client_host):
     #link.intf1.bwParamMax = 4000
     #print(f'modifiying link: {link}')
@@ -144,3 +88,96 @@ def rate_change_worker(network_profile, link, client_host):
                 
     thread = threading.Thread(target=sleep_worker)
     thread.start()
+
+class SingleSwitchTopo(Topo):
+    'Single switch connected to n hosts.'
+    def build(self, n=2):
+        switch = self.addSwitch('s1')
+        # Python's range(N) generates 0..N-1
+        for h in range(n):
+            host = self.addHost('h%s' % (h + 1))
+            self.addLink(host, switch)
+
+class NetworkDomain():
+    def __init__(self, switch, servers, clients):
+        self.switch = switch
+        self.servers = servers
+        self.clients = clients
+
+class MultiSwitchServerClient(Topo):
+    def __init__(self, domains):
+        super().__init__()
+        self.domains = []
+
+        # Each domain contains a list of pairs of (num_servers, num_clients)
+        for i in range(len(domains)):
+            num_servers, num_clients = domains[i]
+            switch = self.addSwitch(f'switch-{i}')
+
+            servers = []
+            for server_number in range(num_servers):
+                server = self.addHost(f'server-{server_number}')
+                self.addLink(server, switch)
+                servers.append(server)
+
+            clients = []
+            for client_number in range(num_clients):
+                client = self.addHost(f'client-{client_number}')
+                self.addLink(client, switch)
+                clients.append(client)
+            
+            domain = NetworkDomain(switch, servers, clients)
+            self.domains.append(domain)
+        
+    # This is in the wrong place...
+    def run_on_domain(self, domain_number, server_commands, client_commands):
+        # SO I've borked it
+        return
+        domain = self.domains[domain_number]
+
+        server_processes = []
+        for server in domain.servers:
+            for command in server_commands:
+                process = server.popen(command)
+                server_processes.append(process)
+
+        client_processes = []
+        for client in domain.clients:
+            for command in client_commands:
+                process = client.popen(command)
+                client_processes.append(process)
+        
+        # Call communicate on these
+        return (server_processes, client_processes)
+
+class NetCommander():
+    def __init__(self,
+                 topo: MultiSwitchServerClient, 
+                 per_domain_server_limits=[], 
+                 per_domain_client_limits=[]):
+        net = Mininet(topo)
+
+        for (domain, server_limits, client_limits) in zip(topo.domains, 
+                                                          per_domain_server_limits, 
+                                                          per_domain_client_limits):
+            switch = net.get(domain.switch)
+            # Links between servers and switch in domain
+            for server, limits in zip(domain.servers, server_limits):
+                # I think the order on these is correct but it might not be
+                # TODO: Check that it is
+                up_limit, down_limit = limits
+                net_server = net.get(server)
+                links = net.linksBetween(net_server, switch)
+                for link in links:
+                    link.intf1.config(bw=up_limit)
+                    link.intf2.config(bw=down_limit)
+
+            for client, limits in zip(domain.clients, client_limits):
+                # I think the order on these is correct but it might not be
+                # TODO: Check that it is
+                up_limit, down_limit = limits
+                net_client = net.get(client)
+                links = net.linksBetween(net_client, switch)
+                for link in links:
+                    link.intf1.config(bw=up_limit)
+                    link.intf2.config(bw=down_limit)
