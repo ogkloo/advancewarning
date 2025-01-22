@@ -2,6 +2,8 @@ import threading
 
 from mininet.topo import Topo
 from mininet.net import Mininet
+from mininet.link import TCIntf
+from mininet.util import custom
 
 from dataclasses import dataclass
 from time import sleep
@@ -150,30 +152,30 @@ class MultiSwitchServerClient(Topo):
         # Call communicate on these
         return (server_processes, client_processes)
 
-class NetCommander():
+class NetCommander(Mininet):
     '''
         Manages a Mininet network
     '''
-    def __init__(self,
-                 topo: MultiSwitchServerClient, 
-                 per_domain_server_limits=[], 
-                 per_domain_client_limits=[]):
+    def __init__(self, topo: MultiSwitchServerClient):
+        intf = custom(TCIntf)
+        super().__init__(topo, intf=intf)
 
-        self.net = Mininet(topo)
+    def start(self, 
+              per_domain_server_limits,
+              per_domain_client_limits):
+        super().start()
 
-        #self.net.start()
-
-        for (domain, server_limits, client_limits) in zip(topo.domains, 
+        for (domain, server_limits, client_limits) in zip(self.topo.domains, 
                                                           per_domain_server_limits, 
                                                           per_domain_client_limits):
-            switch = self.net.get(domain.switch)
+            switch = self.get(domain.switch)
             # Links between servers and switch in domain
             for server, limits in zip(domain.servers, server_limits):
                 # I think the order on these is correct but it might not be
                 # TODO: Check that it is
                 up_limit, down_limit = limits
-                net_server = self.net.get(server)
-                links = self.net.linksBetween(net_server, switch)
+                net_server = self.get(server)
+                links = self.linksBetween(net_server, switch)
                 for link in links:
                     link.intf1.config(bw=up_limit)
                     link.intf2.config(bw=down_limit)
@@ -182,60 +184,45 @@ class NetCommander():
                 # I think the order on these is correct but it might not be
                 # TODO: Check that it is
                 up_limit, down_limit = limits
-                net_client = self.net.get(client)
-                links = self.net.linksBetween(net_client, switch)
+                net_client = self.get(client)
+                links = self.linksBetween(net_client, switch)
                 for link in links:
                     link.intf1.config(bw=up_limit)
                     link.intf2.config(bw=down_limit)
             
-    def start(self):
-        self.net.start()
-
-    def stop(self):
-        self.net.stop()
-
     def clients(self):
-        domains = self.net.topo.domains
+        domains = self.topo.domains
         clients = []
         for domain in domains:
             clients += domain.clients
         
-        return map(self.net.get, clients)
+        return map(self.get, clients)
 
     def servers(self):
-        domains = self.net.topo.domains
+        domains = self.topo.domains
         servers = []
         for domain in domains:
             servers += domain.servers
         
-        return map(self.net.get, servers)
-    
-    def links(self):
-        return self.net.links
-    
-    def switches(self):
-        return self.net.switches
-    
-    def hosts(self):
-        return self.hosts
+        return map(self.get, servers)
     
     def client_links(self):
-        domains = self.net.topo.domains
+        domains = self.topo.domains
         links = []
         for domain in domains:
             for client in domain.clients:
-                links += self.net.linksBetween(self.net.get(client), 
-                                               self.net.get(domain.switch))
+                links += self.linksBetween(self.get(client), 
+                                           self.get(domain.switch))
 
         return links
 
     def server_links(self):
-        domains = self.net.topo.domains
+        domains = self.topo.domains
         links = []
         for domain in domains:
             for server in domain.servers:
-                links += self.net.linksBetween(self.net.get(server), 
-                                               self.net.get(domain.switch))
+                links += self.linksBetween(self.get(server), 
+                                           self.get(domain.switch))
 
         return links
     
