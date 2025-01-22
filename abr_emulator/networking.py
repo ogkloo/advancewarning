@@ -161,6 +161,8 @@ class NetCommander():
 
         self.net = Mininet(topo)
 
+        #self.net.start()
+
         for (domain, server_limits, client_limits) in zip(topo.domains, 
                                                           per_domain_server_limits, 
                                                           per_domain_client_limits):
@@ -186,13 +188,19 @@ class NetCommander():
                     link.intf1.config(bw=up_limit)
                     link.intf2.config(bw=down_limit)
             
+    def start(self):
+        self.net.start()
+
+    def stop(self):
+        self.net.stop()
+
     def clients(self):
         domains = self.net.topo.domains
         clients = []
         for domain in domains:
             clients += domain.clients
         
-        return clients
+        return map(self.net.get, clients)
 
     def servers(self):
         domains = self.net.topo.domains
@@ -200,7 +208,7 @@ class NetCommander():
         for domain in domains:
             servers += domain.servers
         
-        return servers
+        return map(self.net.get, servers)
     
     def links(self):
         return self.net.links
@@ -230,3 +238,4 @@ class NetCommander():
                                                self.net.get(domain.switch))
 
         return links
+    
