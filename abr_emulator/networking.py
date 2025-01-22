@@ -151,23 +151,27 @@ class MultiSwitchServerClient(Topo):
         return (server_processes, client_processes)
 
 class NetCommander():
+    '''
+        Manages a Mininet network
+    '''
     def __init__(self,
                  topo: MultiSwitchServerClient, 
                  per_domain_server_limits=[], 
                  per_domain_client_limits=[]):
-        net = Mininet(topo)
+
+        self.net = Mininet(topo)
 
         for (domain, server_limits, client_limits) in zip(topo.domains, 
                                                           per_domain_server_limits, 
                                                           per_domain_client_limits):
-            switch = net.get(domain.switch)
+            switch = self.net.get(domain.switch)
             # Links between servers and switch in domain
             for server, limits in zip(domain.servers, server_limits):
                 # I think the order on these is correct but it might not be
                 # TODO: Check that it is
                 up_limit, down_limit = limits
-                net_server = net.get(server)
-                links = net.linksBetween(net_server, switch)
+                net_server = self.net.get(server)
+                links = self.net.linksBetween(net_server, switch)
                 for link in links:
                     link.intf1.config(bw=up_limit)
                     link.intf2.config(bw=down_limit)
@@ -176,8 +180,53 @@ class NetCommander():
                 # I think the order on these is correct but it might not be
                 # TODO: Check that it is
                 up_limit, down_limit = limits
-                net_client = net.get(client)
-                links = net.linksBetween(net_client, switch)
+                net_client = self.net.get(client)
+                links = self.net.linksBetween(net_client, switch)
                 for link in links:
                     link.intf1.config(bw=up_limit)
                     link.intf2.config(bw=down_limit)
+            
+    def clients(self):
+        domains = self.net.topo.domains
+        clients = []
+        for domain in domains:
+            clients += domain.clients
+        
+        return clients
+
+    def servers(self):
+        domains = self.net.topo.domains
+        servers = []
+        for domain in domains:
+            servers += domain.servers
+        
+        return servers
+    
+    def links(self):
+        return self.net.links
+    
+    def switches(self):
+        return self.net.switches
+    
+    def hosts(self):
+        return self.hosts
+    
+    def client_links(self):
+        domains = self.net.topo.domains
+        links = []
+        for domain in domains:
+            for client in domain.clients:
+                links += self.net.linksBetween(self.net.get(client), 
+                                               self.net.get(domain.switch))
+
+        return links
+
+    def server_links(self):
+        domains = self.net.topo.domains
+        links = []
+        for domain in domains:
+            for server in domain.servers:
+                links += self.net.linksBetween(self.net.get(server), 
+                                               self.net.get(domain.switch))
+
+        return links
