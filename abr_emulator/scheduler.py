@@ -17,7 +17,8 @@ from .networking import (RateChangeEvent,
                          NotifyEvent, 
                          InactiveNotify, 
                          NetworkProfile, 
-                         SingleSwitchTopo)
+                         SingleSwitchTopo,
+                         NetCommander)
 
 def rate_change_worker(a, b, c):
     ''' rate_change_worker 
@@ -54,6 +55,11 @@ class TestCase():
     proto: str
     n: int
 
+    # These rarely need to be set
+    server_port = 8080
+    istream = DEFAULTS['istream']
+    quictun_client = DEFAULTS['quictun-client']
+
     def __init__(self, 
                  video_mpd, 
                  video_name, 
@@ -63,7 +69,7 @@ class TestCase():
                  max_buffer, 
                  initial_quality, 
                  initial_buffer, 
-                 proto, 
+                 use_quic, 
                  n):
 
         self.uuid = uuid.uuid4()
@@ -75,7 +81,7 @@ class TestCase():
         self.max_buffer = max_buffer
         self.initial_quality = initial_quality
         self.initial_buffer = initial_buffer
-        self.proto = proto
+        self.use_quic = use_quic 
         self.n = n
 
     def manifest(self):
@@ -88,8 +94,29 @@ class TestCase():
                 'max_buffer': self.max_buffer,
                 'initial_quality': self.initial_quality,
                 'initial_buffer': self.initial_buffer,
-                'proto': self.proto,
-                'n': self.n}
+                'use_quic': self.use_quic,
+                'n': self.n,
+                'server_port': self.server_port,
+                'istream': self.istream}
+    
+    def run_test(self, server_host, client_host):
+        '''Run this test between an already running server_host and new client_host.
+
+        Args:
+            server_host (`Mininet.Host`): A host which should be already running an http server.
+            client_host (`Mininet.Host`): The host to run the test on.
+        '''        
+        server_ip = server_host.IP()
+        if not self.use_quic:
+            istream_client = client_host.popen(
+                f'{self.istream} --mod_downloader tcp -i http://{server_ip}:{self.server_port}/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method}')
+        else:
+            quictun_client_out = client_host.popen(
+                f'{self.quictun_client} --listen-on tcp:127.0.0.1:6500 --server-endpoint {server_ip}:7500 --token tcp:{server_ip}:{self.server_port} --insecure-skip-verify True &')
+            istream_client = client_host.popen(
+                f'{self.istream} --mod_downloader tcp -i http://127.0.0.1:6500/{self.video.url} --mod_abr {self.abr_strategy} --max_buffer {self.max_buffer} --search_method {self.search_method}')
+        
+        return istream_client
 
 @dataclass
 class TestDescription():
