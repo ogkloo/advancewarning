@@ -1,4 +1,5 @@
 import threading
+from typing import List
 
 from mininet.topo import Topo
 from mininet.net import Mininet
@@ -7,12 +8,13 @@ from mininet.util import custom
 
 from dataclasses import dataclass
 from time import sleep
-from typing import List
 
 from .config import DEFAULTS
 
 @dataclass
 class RateChangeEvent():
+    '''
+    '''
     new_rate: float
     duration: float
 
@@ -162,8 +164,8 @@ class NetCommander(Mininet):
         super().__init__(topo, intf=intf)
 
     def start(self, 
-              per_domain_server_limits: List[(int, int)],
-              per_domain_client_limits: List[(int, int)]):
+              per_domain_server_limits,
+              per_domain_client_limits):
 
         super().start()
 
@@ -172,10 +174,9 @@ class NetCommander(Mininet):
                                                           per_domain_client_limits):
             
             switch = self.get(domain.switch)
+
             # Links between servers and switch in domain
             for server, limits in zip(domain.servers, server_limits):
-                # I think the order on these is correct but it might not be
-                # TODO: Check that it is
                 up_limit, down_limit = limits
                 net_server = self.get(server)
                 links = self.linksBetween(net_server, switch)
@@ -184,8 +185,6 @@ class NetCommander(Mininet):
                     link.intf2.config(bw=down_limit)
 
             for client, limits in zip(domain.clients, client_limits):
-                # I think the order on these is correct but it might not be
-                # TODO: Check that it is
                 up_limit, down_limit = limits
                 net_client = self.get(client)
                 links = self.linksBetween(net_client, switch)
@@ -229,3 +228,16 @@ class NetCommander(Mininet):
 
         return links
     
+def playback(link, network_profiles: List[RateChangeEvent], uplink=False):
+    '''
+        'Play' a profile from a list of profiles `network_profiles` for a 
+        given link `link`.
+
+        By default, controls the host's *downlink* speed as set by TC. To set 
+        uplink speed, set the uplink argument to true.
+    '''
+    # TODO: Find some sane way to make this properly async.
+    # Really, this should properly send asyncio events or something.
+    # Currently, it's just gonna run and I hope you put it on another thread.
+    for profile in network_profiles:
+        pass

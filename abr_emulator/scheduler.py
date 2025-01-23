@@ -12,13 +12,13 @@ from mininet.net import Mininet
 from mininet.link import TCIntf
 from mininet.util import custom
 
-from config import DEFAULTS
-from networking import (RateChangeEvent, 
-                        NotifyEvent, 
-                        InactiveNotify, 
-                        NetworkProfile, 
-                        SingleSwitchTopo, 
-                        rate_change_worker)
+from .config import DEFAULTS
+from .networking import (RateChangeEvent, 
+                         NotifyEvent, 
+                         InactiveNotify, 
+                         NetworkProfile, 
+                         SingleSwitchTopo, 
+                         rate_change_worker)
 
 @dataclass
 class TestCase():
@@ -37,7 +37,18 @@ class TestCase():
     proto: str
     n: int
 
-    def __init__(self, video_mpd, video_name, abr, search_method, net_condition, max_buffer, initial_quality, initial_buffer, proto, n):
+    def __init__(self, 
+                 video_mpd, 
+                 video_name, 
+                 abr, 
+                 search_method, 
+                 net_condition, 
+                 max_buffer, 
+                 initial_quality, 
+                 initial_buffer, 
+                 proto, 
+                 n):
+
         self.uuid = uuid.uuid4()
 
         self.video = self.Video(video_name, video_mpd)
@@ -99,6 +110,7 @@ class TestDescription():
                       initial_buffers, 
                       protos, 
                       N):
+
         for case in itertools.product(videos,
                                       rates,
                                       durations,
@@ -159,6 +171,7 @@ class TestDescription():
                             quictun_client=DEFAULTS['quictun-client'],
                             quictun_server=DEFAULTS['quictun-server']
                             ) -> str:
+
         print('Started connectivity test')
         topo = SingleSwitchTopo(n=2)
         initial_rate = events.initial_rate
