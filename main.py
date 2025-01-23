@@ -2,13 +2,12 @@
 
 import abr_emulator.networking as network
 
-domains = [(1, 4)]
+domains = [(1, 10)]
 topo = network.MultiSwitchServerClient(domains)
 
 net = network.NetCommander(topo)
                            
-net.start([[(500, 100)]], [[(100, 100), (100, 100), (100, 100), (100, 100)]])
-
+net.start([[(5000, 100)]], [[(250, 1000)] * 9 + [(10, 10)]])
 # Lower client downlink
 #for link in net.client_links():
 #    link.intf2.config(bw=2)

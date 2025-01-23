@@ -7,6 +7,7 @@ from mininet.util import custom
 
 from dataclasses import dataclass
 from time import sleep
+from typing import List
 
 from .config import DEFAULTS
 
@@ -33,7 +34,16 @@ class InactiveNotify():
     event_type: 'str'
 
 class NetworkProfile():
-    def __init__(self, initial_rate, outage_rate, new_rate, before_time, notify_time, outage_time, valid_time, after_time):
+    def __init__(self, 
+                 initial_rate, 
+                 outage_rate, 
+                 new_rate, 
+                 before_time, 
+                 notify_time, 
+                 outage_time, 
+                 valid_time, 
+                 after_time):
+
         self.summary = f'{initial_rate}, {outage_rate}, {new_rate}, {before_time}, {notify_time}, {outage_time}, {valid_time}, {after_time}'
 
         self.initial_rate = initial_rate
@@ -45,12 +55,21 @@ class NetworkProfile():
         self.valid = valid_time
         self.after_time = after_time
 
-        self.profile = [RateChangeEvent(initial_rate, before_time-notify_time), 
-                        NotifyEvent(notify_time, outage_time, valid_time, initial_rate, outage_rate, new_rate),
-                        RateChangeEvent(initial_rate, notify_time),
-                        RateChangeEvent(outage_rate, outage_time), 
+        self.profile = [RateChangeEvent(initial_rate, 
+                                        before_time-notify_time), 
+                        NotifyEvent(notify_time, 
+                                    outage_time, 
+                                    valid_time, 
+                                    initial_rate, 
+                                    outage_rate, 
+                                    new_rate),
+                        RateChangeEvent(initial_rate, 
+                                        notify_time),
+                        RateChangeEvent(outage_rate, 
+                                        outage_time), 
                         InactiveNotify('stop'),
-                        RateChangeEvent(new_rate, after_time)]
+                        RateChangeEvent(new_rate, 
+                                        after_time)]
     
     def summarize(self):
         return self.summary
@@ -130,44 +149,25 @@ class MultiSwitchServerClient(Topo):
             
             domain = NetworkDomain(switch, servers, clients)
             self.domains.append(domain)
-        
-    # This is in the wrong place...
-    def run_on_domain(self, domain_number, server_commands, client_commands):
-        # SO I've borked it
-        return
-        domain = self.domains[domain_number]
-
-        server_processes = []
-        for server in domain.servers:
-            for command in server_commands:
-                process = server.popen(command)
-                server_processes.append(process)
-
-        client_processes = []
-        for client in domain.clients:
-            for command in client_commands:
-                process = client.popen(command)
-                client_processes.append(process)
-        
-        # Call communicate on these
-        return (server_processes, client_processes)
 
 class NetCommander(Mininet):
     '''
-        Manages a Mininet network
+        A mininet net with initial rates and two disjoint sets of hosts per domain.
     '''
     def __init__(self, topo: MultiSwitchServerClient):
         intf = custom(TCIntf)
         super().__init__(topo, intf=intf)
 
     def start(self, 
-              per_domain_server_limits,
-              per_domain_client_limits):
+              per_domain_server_limits: List[(int, int)],
+              per_domain_client_limits: List[(int, int)]):
+
         super().start()
 
         for (domain, server_limits, client_limits) in zip(self.topo.domains, 
                                                           per_domain_server_limits, 
                                                           per_domain_client_limits):
+            
             switch = self.get(domain.switch)
             # Links between servers and switch in domain
             for server, limits in zip(domain.servers, server_limits):
