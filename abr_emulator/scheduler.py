@@ -351,7 +351,6 @@ def abr_test(initial_rate: int,
 
     #sleep(cushion)
     #print('link:', link.intf1)
-    rate_change_worker(events, link, h1)
 
     # Wait to avoid anything breaking
     #sleep(cushion)

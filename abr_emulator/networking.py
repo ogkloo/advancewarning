@@ -242,6 +242,8 @@ def playback(link, network_profiles: List[RateChangeEvent], uplink=False):
 
         By default, controls the host's *downlink* speed as set by TC. To set 
         uplink speed, set the uplink argument to true.
+
+        TC is actually too slow most of the time.
     '''
     # TODO: Find some sane way to make this async when you go and do that.
     # Really, this should properly send asyncio events or something.
