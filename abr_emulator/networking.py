@@ -126,6 +126,9 @@ class NetworkDomain():
         self.clients = clients
 
 class MultiSwitchServerClient(Topo):
+    '''
+        2 disjoint sets of machines per switch
+    '''
     def __init__(self, domains):
         super().__init__()
         self.domains = []
