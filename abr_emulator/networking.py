@@ -246,6 +246,7 @@ def playback(link, network_profiles: List[RateChangeEvent], uplink=False):
     # TODO: Find some sane way to make this async when you go and do that.
     # Really, this should properly send asyncio events or something.
     # Currently, it's just gonna run and I hope you put it on another thread.
+
     for profile in network_profiles:
         link.intf2.config(bw=profile.new_rate)
         sleep(profile.duration)
