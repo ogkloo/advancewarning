@@ -13,7 +13,9 @@ from .config import DEFAULTS
 
 @dataclass
 class RateChangeEvent():
-    '''
+    ''' Describes a rate and a duration.
+
+    Constructor usage: RateChangeEvent(new_rate, duration)
     '''
     new_rate: float
     duration: float
@@ -241,8 +243,9 @@ def playback(link, network_profiles: List[RateChangeEvent], uplink=False):
         By default, controls the host's *downlink* speed as set by TC. To set 
         uplink speed, set the uplink argument to true.
     '''
-    # TODO: Find some sane way to make this properly async.
+    # TODO: Find some sane way to make this async when you go and do that.
     # Really, this should properly send asyncio events or something.
     # Currently, it's just gonna run and I hope you put it on another thread.
     for profile in network_profiles:
-        pass
+        link.intf2.config(bw=profile.new_rate)
+        sleep(profile.duration)
