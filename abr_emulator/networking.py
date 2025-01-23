@@ -91,27 +91,6 @@ class NetworkProfile():
             'after_time': self.after_time
         }
 
-def rate_change_worker(network_profile, link, client_host):
-    #link.intf1.bwParamMax = 4000
-    #print(f'modifiying link: {link}')
-    def sleep_worker():
-        notifier_bin = DEFAULTS['notifier']
-        for event in network_profile.profile:
-            if type(event) == RateChangeEvent:
-                #print(f'rate change: {event.new_rate}, {event.duration}')
-                link.intf1.config(bw=event.new_rate)
-                sleep(event.duration)
-            elif type(event) == NotifyEvent:
-                #print(f'notification: -m {event.to_string()}')
-                client_out = client_host.popen(f'{notifier_bin} -m {event.to_string()}')
-                sleep(event.notification_time)
-            elif type(event) == InactiveNotify:
-                #print(f'notification: --{event.event_type}')
-                client_out = client_host.popen(f'{notifier_bin} --{event.event_type}')
-                
-    thread = threading.Thread(target=sleep_worker)
-    thread.start()
-
 class SingleSwitchTopo(Topo):
     'Single switch connected to n hosts.'
     def build(self, n=2):
@@ -121,6 +100,24 @@ class SingleSwitchTopo(Topo):
             host = self.addHost('h%s' % (h + 1))
             self.addLink(host, switch)
 
+''' TODO: Really, the design here should be much better.
+    This topology could be better understood as one of a few things:
+
+    1. A set of switches, each connecting _n_ disjoint sets of hosts. 
+    2. _n_ disjoint sets of hosts, with each host in a host set being connected 
+       to the same set of switches.
+
+    In either case, the size of the host sets are unconstrained and may vary
+    freely. The switch topology could also vary freely, although the 
+    construction could more or less assume that they were unconnected, or that
+    their interconnection didn't matter very much.
+
+    For now, what's going on here is that a domain is a single switch with 2
+    disjoint sets, called clients and servers. This is still advantageous so
+    I'm keeping it for now. But this note will hopefully remind me to get back
+    to it, since a much more general, richer topology which represents quite a
+    lot of real-world networks is possible.
+'''
 class NetworkDomain():
     def __init__(self, switch, servers, clients):
         self.switch = switch
@@ -209,6 +206,10 @@ class NetCommander(Mininet):
         return map(self.get, servers)
     
     def client_links(self):
+        '''
+            Return all links between clients and switches across all domains.
+        '''
+        # TODO: Filter by domain?
         domains = self.topo.domains
         links = []
         for domain in domains:
@@ -219,6 +220,10 @@ class NetCommander(Mininet):
         return links
 
     def server_links(self):
+        '''
+            Return all links between servers and switches across all domains.
+        '''
+        # TODO: Filter by domain?
         domains = self.topo.domains
         links = []
         for domain in domains:

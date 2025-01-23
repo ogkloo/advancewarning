@@ -17,8 +17,25 @@ from .networking import (RateChangeEvent,
                          NotifyEvent, 
                          InactiveNotify, 
                          NetworkProfile, 
-                         SingleSwitchTopo, 
-                         rate_change_worker)
+                         SingleSwitchTopo)
+
+def rate_change_worker(a, b, c):
+    ''' rate_change_worker 
+        Originally, this method changed the link rate according to a schedule, 
+        however this usage is deprecated as part of the move to a more 
+        principled way of managing the link rate schedule process.
+
+    Args:
+        a (_type_): Deprecated.
+        b (_type_): Deprecated.
+        c (_type_): Deprecated.
+
+    Raises:
+        AssertionError: Always raised, method unimplemented.
+    '''
+
+    # TODO: Remove this definition entirely.
+    raise AssertionError('This method is deprecated and calls to it must be removed')
 
 @dataclass
 class TestCase():
