@@ -13,12 +13,9 @@ from mininet.link import TCIntf
 from mininet.util import custom
 
 from .config import DEFAULTS
-from .networking import (RateChangeEvent, 
-                         NotifyEvent, 
-                         InactiveNotify, 
-                         NetworkProfile, 
-                         SingleSwitchTopo,
-                         NetCommander)
+from .networking import *
+from .utils import *
+
 
 def rate_change_worker(a, b, c):
     ''' rate_change_worker 
@@ -114,7 +111,7 @@ class TestCase():
             quictun_client_out = client_host.popen(
                 f'{self.quictun_client} --listen-on tcp:127.0.0.1:6500 --server-endpoint {server_ip}:7500 --token tcp:{server_ip}:{self.server_port} --insecure-skip-verify True &')
             istream_client = client_host.popen(
-                f'{self.istream} --mod_downloader tcp -i http://127.0.0.1:6500/{self.video.url} --mod_abr {self.abr_strategy} --max_buffer {self.max_buffer} --search_method {self.search_method}')
+                f'{self.istream} --mod_downloader tcp -i http://127.0.0.1:6500/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method}')
         
         return istream_client
 
@@ -152,7 +149,7 @@ class TestDescription():
                       max_buffers, 
                       initial_qualities, 
                       initial_buffers, 
-                      protos, 
+                      use_quic, 
                       N):
 
         for case in itertools.product(videos,
@@ -164,7 +161,7 @@ class TestDescription():
                                       max_buffers,
                                       initial_qualities,
                                       initial_buffers, 
-                                      protos,
+                                      use_quic,
                                       range(0,N)):
             video, rate_trio, duration_trio, notification_trio, abr, search_method, max_buffer, initial_quality, initial_buffer, proto, n = case
             video_url, video_name = video
@@ -268,139 +265,50 @@ class TestDescription():
         else:
             return quic_iperf_out
 
-    def run_tests(self):
+    def run_tests(self, num_servers, num_clients):
+        # Just put them all on one domain rn
+        domains = [(num_servers, num_clients)]
+        topo = MultiSwitchServerClient(domains)
+        net = NetCommander(topo)
+        net.start([[(5000, 1000)]*num_servers], [[(250, 250)]*num_clients])
+
+        client_server_map = {}
+        for (server, clients) in zip(net.servers(), 
+                                     chunks(list(net.clients()), num_servers)):
+            client_server_map = {**client_server_map, **{client: server for client in clients}}
+
+        server_processes = [server.popen('http-server -p %d . &' % 8080) for server in net.servers()]
+        sleep(2)
+
         done = 0
         print(f'0 / {len(self.test_cases)}')
-        for test_case in self.test_cases:
+
+        batches = chunks(self.test_cases, num_clients)
+        print(batches)
+        for batch in batches:
             # Set up output directory
-            manifest = test_case.manifest()
-            result_dirname = os.path.join(self.results_dir, str(test_case.uuid))
-            #print(result_dirname)
-            os.makedirs(result_dirname, exist_ok=True)
-
-            # Run test
-            header, results, logs = abr_test(test_case.net_condition.profile[0].new_rate, 
-                                            test_case.net_condition, 
-                                            test_case.video.url, 
-                                            test_case.abr, 
-                                            test_case.max_buffer, 
-                                            test_case.search_method, 
-                                            test_case.initial_quality, 
-                                            test_case.initial_buffer, 
-                                            test_case.proto)
-
-            # Write results
-            if self.write_headers:
-                with open(os.path.join(result_dirname, 'header.txt'), 'w+') as header_file:
-                    header_file.write(header)
-
-            with open(os.path.join(result_dirname, 'results.json'), 'w+') as results_file:
-                json.dump(results, results_file)
-
-            if self.write_logs:
-                with open(os.path.join(result_dirname, 'logs.txt'), 'w+') as log_file:
-                    log_file.write(logs)
+            for test_case in batch:
+                manifest = test_case.manifest()
+                result_filename = os.path.join(self.results_dir, str(test_case.uuid) + '.json')
             
-            with open(os.path.join(result_dirname, 'manifest.json'), 'w+') as manifest_file:
-                json.dump(manifest, manifest_file)
-            
-            done += 1
+            istream_out = [test_case.run_test(client_server_map[client], client) 
+                           for test_case, client in zip(batch, net.clients())]
+
+            streams = [result.communicate() for result in istream_out]
+            results = [stream[0].decode('utf-8') for stream in streams]
+            errors = [stream[1].decode('utf-8') for stream in streams]
+
+            for result in results:
+                if len(result) != 0:
+                    split = result.partition('{')
+                    results_header = split[0]
+                    results_json = json.loads(split[1] + split[2])
+
+                with open(result_filename, 'w+') as results_file:
+                    json.dump(results_json, results_file)
+
+            done += len(batch)
             if done % self.update == 0:
                 print(f'{done} / {len(self.test_cases)}')
-
-def abr_test(initial_rate: int,
-            events: list[tuple[int, float]], 
-            video: str, 
-            abr_strategy: str, 
-            max_buffer: float,
-            search_method: str,
-            initial_quality: int | None,
-            initial_buffer: float | None,
-            proto: str,
-            server_port=DEFAULTS['http-port'], 
-            cushion=DEFAULTS['cushion'],
-            istream=DEFAULTS['istream'],
-            quictun_client=DEFAULTS['quictun-client'],
-            quictun_server=DEFAULTS['quictun-server'],
-            ) -> tuple[str, dict, str]:
-    ''' Run a test involving a large bandwidth change. '''
-
-    topo = SingleSwitchTopo(n=2)
-    intf = custom(TCIntf, bw=1000)
-    try:
-        net = Mininet(topo, intf=intf)
-    except:
-        print('cleanup')
-        cleanup()
-        net = Mininet(topo, intf=intf)
-
-    net.start()
-
-    h1, h2 = net.get('h1', 'h2')
-
-    link = net.linksBetween(h2, net.switches[0])[0]
-    #link.intf1.bwParamMax = 4000
-    link.intf1.config(bw=initial_rate)
-
-    # Http-server
-    if proto == 'QUIC':
-        print('quictun')
-        h2.popen(f'{quictun_server} --listen-on {h2.IP()}:7500 &')
-
-    h2.popen('http-server -p %d . &' % server_port)
-
-    #print('started server')
-    # Wait for the server to start
-    sleep(cushion)
-
-    # Start iStream player
-    if proto == 'QUIC':
-        print('quictun')
-        quictun_client_out = h1.popen(f'{quictun_client} --listen-on tcp:127.0.0.1:6500 --server-endpoint {h2.IP()}:7500 --token tcp:{h2.IP()}:{server_port} --insecure-skip-verify True &')
-        sleep(cushion)
-        if abr_strategy == 'fixed':
-            istream_client = h1.popen(
-                f'{istream} --mod_downloader tcp -i http://127.0.0.1:6500/{video} --mod_abr {abr_strategy} --initial_quality {initial_quality} --initial_buffer {initial_buffer} --max_buffer {max_buffer} --search_method {search_method}')
-        else:
-            istream_client = h1.popen(
-                f'{istream} --mod_downloader tcp -i http://127.0.0.1:6500/{video} --mod_abr {abr_strategy} --max_buffer {max_buffer} --search_method {search_method}')
-    else:
-        if abr_strategy == 'fixed':
-            istream_client = h1.popen(
-                f'{istream} --mod_downloader tcp -i http://{h2.IP()}:{server_port}/{video} --mod_abr {abr_strategy} --initial_quality {initial_quality} --initial_buffer {initial_buffer} --max_buffer {max_buffer} --search_method {search_method}')
-        else:
-            print('tcp istream')
-            istream_client = h1.popen(
-                f'{istream} --mod_downloader tcp -i http://{h2.IP()}:{server_port}/{video} --mod_abr {abr_strategy} --max_buffer {max_buffer} --search_method {search_method}')
-
-    print(f'istream started with {abr_strategy}')
-    #print('started istream player')
-
-    #sleep(cushion)
-    #print('link:', link.intf1)
-
-    # Wait to avoid anything breaking
-    #sleep(cushion)
-
-    #print('await results')
-    error_trace = istream_client.communicate()[1].decode('utf-8')
-    results = istream_client.communicate()[0].decode('utf-8')
-
-    #print('test finished')
-    
-    h2.popen('killall http-server')
-    h1.popen('killall iplay')
-    if proto == 'QUIC':
-        h1.popen('killall quictun-client')
-        h2.popen('killall quictun-server')
-    
-    #print('processes killed')
-    net.stop()
-
-    if len(results) == 0:
-        return '', {}, error_trace
-    else:
-        split = results.partition('{')
-        results_header = split[0]
-        results_json = json.loads(split[1] + split[2])
-        return results_header, results_json, error_trace
+        
+        net.stop()
