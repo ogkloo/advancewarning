@@ -210,7 +210,6 @@ class TestDescription():
         print(f'0 / {len(self.test_cases)}')
 
         batches = chunks(self.test_cases, num_clients)
-        print(batches)
         for batch in batches:
             # Set up output directory
             for test_case in batch:
