@@ -10,6 +10,8 @@ from time import sleep
 
 from .config import DEFAULTS
 
+import abr_emulator.utils as utils
+
 @dataclass
 class RateChangeEvent():
     ''' Describes a rate and a duration.
@@ -219,6 +221,20 @@ class NetCommander(Mininet):
                                            self.get(domain.switch))
 
         return links
+    
+    def links_on_client(self):
+        '''
+            This is very similar to the above method but also includes which 
+            client is involved.
+        '''
+        domains = self.topo.domains
+        links = {}
+        for domain in domains:
+            for client in domain.clients:
+                links[self.get(client)] = self.linksBetween(self.get(client), 
+                                                            self.get(domain.switch))
+
+        return links
 
     def server_links(self):
         '''
@@ -249,5 +265,41 @@ def playback(link, network_profiles: List[RateChangeEvent], uplink=False):
     # Currently, it's just gonna run and I hope you put it on another thread.
 
     for profile in network_profiles:
-        link.intf2.config(bw=profile.new_rate)
-        sleep(profile.duration)
+        if type(profile) == RateChangeEvent:
+            link.intf2.config(bw=profile.new_rate)
+            sleep(profile.duration)
+
+class NetEvent2:
+    def __init__(self, link, rate, time):
+        self.link = link
+        self.rate = rate
+        self.time = time
+
+def absolute_time_profile(link, profile):
+    # Make the profile start at 0 + append the link to it
+    t = 0
+    out = []
+    for event in profile:
+        if type(event) == RateChangeEvent:
+            out.append(NetEvent2(link, event.new_rate, event.duration + t))
+            t += event.duration
+    return out
+
+def unify_streams(streams):
+    # Streams are pairs of (link, profile_list)
+    a = [absolute_time_profile(link, profile) for link, profile in streams]
+
+    # Get flattened list of NetEvent2s
+    af = utils.flatten(a)
+    # Sort by occurrence time
+    return sorted(af, key=lambda e: e.time)
+
+def single_thread_playback(streams):
+    events = unify_streams(streams)
+
+    now = 0
+    for event in events:
+        sleep(event.time - now)
+        # TODO: Revise to handle all events
+        event.link.intf2.config(bw=event.rate)
+        now = event.time

@@ -99,16 +99,25 @@ class TestCase():
         '''Run this test between an already running server_host and new client_host.
 
         Args:
+            net: The net these two hosts are in
             server_host (`Mininet.Host`): A host which should be already running an http server.
             client_host (`Mininet.Host`): The host to run the test on.
         '''        
-        print(client_host)
         server_ip = server_host.IP()
+        # Control link
+
+        # TODO: Probably not this
+        # It really should probably be passed the relevant link or something
+        #link = net.linksBetween(net.switches[0], client_host)[0]
+
         if not self.use_quic:
+            # TODO: Clean this up to respect defaults
+            # Maybe also fully pull out defaults?
             format_string = ["nix-shell", "--run", f"./istream-player/istream --mod_downloader tcp -i http://{server_ip}:{self.server_port}/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method}"]
-            print(format_string)
             istream_client = client_host.popen(format_string)
         else:
+            print('this part is totally broken rn sorry')
+            exit(1)
             quictun_client_out = client_host.popen(
                 f'{self.quictun_client} --listen-on tcp:127.0.0.1:6500 --server-endpoint {server_ip}:7500 --token tcp:{server_ip}:{self.server_port} --insecure-skip-verify True &')
             istream_client = client_host.popen(
@@ -217,7 +226,13 @@ class TestDescription():
         batches = list(batched(self.test_cases, num_clients))
 
         for batch in batches:
-            # Set up output directory
+
+            # TODO: Make sure link and test case match up
+            # They should. BUT
+            links = net.client_links()
+            streams = zip(links, [test_case.net_condition.profile for test_case in batch])
+            rate_change_worker = single_threaded_playback_wrapper(streams)
+            rate_change_worker.start()
             
             istream_out = [(test_case, test_case.run_test(client_server_map[client], client))
                            for test_case, client in zip(batch, net.clients())]
