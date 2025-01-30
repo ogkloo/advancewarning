@@ -1,4 +1,3 @@
-import threading
 from typing import List
 
 from mininet.topo import Topo
