@@ -218,21 +218,23 @@ class TestDescription():
 
         for batch in batches:
             # Set up output directory
-            for test_case in batch:
-                manifest = test_case.manifest()
-                result_filename = os.path.join(self.results_dir, str(test_case.uuid) + '.json')
             
-            istream_out = [test_case.run_test(client_server_map[client], client) 
+            istream_out = [(test_case, test_case.run_test(client_server_map[client], client))
                            for test_case, client in zip(batch, net.clients())]
 
-            streams = [result.communicate() for result in istream_out]
-            results = [stream[0].decode('utf-8') for stream in streams]
-            errors = [stream[1].decode('utf-8') for stream in streams]
+            streams = [(test_case, result.communicate()) for test_case, result in istream_out]
 
-            for result, error in zip(results, errors):
+            for test_case, stream_set in streams:
+                manifest = test_case.manifest()
+                result_filename = os.path.join(self.results_dir, str(test_case.uuid) + '.json')
+
+                result = stream_set[0].decode('utf-8')
+                error = stream_set[1].decode('utf-8')
+
                 if len(result) != 0:
                     split = result.partition('{')
-                    results_header = split[0]
+                    _results_header = split[0]
+
                     results_json = json.loads(split[1] + split[2])
 
                     with open(result_filename, 'w+') as results_file:
