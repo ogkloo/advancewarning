@@ -37,4 +37,4 @@ tests.mk_test_cases(videos=videos,
                     use_quic = [False],
                     N=1)
 
-tests.run_tests(1, 4)
+tests.run_tests(1, 5)
