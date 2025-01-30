@@ -13,7 +13,7 @@ def playback_wrapper(link, network_profiles):
 
 # Fast-varying link between 100 and 10Mbps
 profile = [network.RateChangeEvent(rate, duration) 
-           for rate, duration in [(100, 1), (10, 1)]*15]
+           for rate, duration in [(100, 15), (10, 15)]]
 
 domains = [(1, 1)]
 topo = network.MultiSwitchServerClient(domains)

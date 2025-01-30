@@ -16,7 +16,6 @@ from .config import DEFAULTS
 from .networking import *
 from .utils import *
 
-
 def rate_change_worker(a, b, c):
     ''' rate_change_worker 
         Originally, this method changed the link rate according to a schedule, 
@@ -49,12 +48,12 @@ class TestCase():
     max_buffer: float
     initial_quality: int
     initial_buffer: float
-    proto: str
+    use_quic: bool
     n: int
 
     # These rarely need to be set
     server_port = 8080
-    istream = DEFAULTS['istream']
+    istream = ["nix-shell", "--run", "./istream-player/istream"]
     quictun_client = DEFAULTS['quictun-client']
 
     def __init__(self, 
@@ -103,10 +102,12 @@ class TestCase():
             server_host (`Mininet.Host`): A host which should be already running an http server.
             client_host (`Mininet.Host`): The host to run the test on.
         '''        
+        print(client_host)
         server_ip = server_host.IP()
         if not self.use_quic:
-            istream_client = client_host.popen(
-                f'{self.istream} --mod_downloader tcp -i http://{server_ip}:{self.server_port}/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method}')
+            format_string = ["nix-shell", "--run", f"./istream-player/istream --mod_downloader tcp -i http://{server_ip}:{self.server_port}/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method}"]
+            print(format_string)
+            istream_client = client_host.popen(format_string)
         else:
             quictun_client_out = client_host.popen(
                 f'{self.quictun_client} --listen-on tcp:127.0.0.1:6500 --server-endpoint {server_ip}:7500 --token tcp:{server_ip}:{self.server_port} --insecure-skip-verify True &')
@@ -209,7 +210,12 @@ class TestDescription():
         done = 0
         print(f'0 / {len(self.test_cases)}')
 
-        batches = chunks(self.test_cases, num_clients)
+        # This batches the list in the wrong way unfortunately
+        # batches = list(chunks(self.test_cases, 5))
+        # print(len(batches), batches)
+
+        batches = list(batched(self.test_cases, num_clients))
+
         for batch in batches:
             # Set up output directory
             for test_case in batch:
@@ -223,14 +229,16 @@ class TestDescription():
             results = [stream[0].decode('utf-8') for stream in streams]
             errors = [stream[1].decode('utf-8') for stream in streams]
 
-            for result in results:
+            for result, error in zip(results, errors):
                 if len(result) != 0:
                     split = result.partition('{')
                     results_header = split[0]
                     results_json = json.loads(split[1] + split[2])
 
-                with open(result_filename, 'w+') as results_file:
-                    json.dump(results_json, results_file)
+                    with open(result_filename, 'w+') as results_file:
+                        json.dump(results_json, results_file)
+                else:
+                    print(error)
 
             done += len(batch)
             if done % self.update == 0:
