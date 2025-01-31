@@ -82,7 +82,7 @@ class NetworkProfile():
     def get_duration(self):
         return self.before_time + self.outage_time + self.after_time
     
-    def to_json(self):
+    def to_json(self) -> dict[int, any]:
         return {
             'initial_rate': self.initial_rate,
             'outage_rate': self.outage_rate,
@@ -263,34 +263,58 @@ def playback(link, network_profiles: List[RateChangeEvent], uplink=False):
     # TODO: Find some sane way to make this async when you go and do that.
     # Really, this should properly send asyncio events or something.
     # Currently, it's just gonna run and I hope you put it on another thread.
-
     for profile in network_profiles:
         if type(profile) == RateChangeEvent:
             link.intf2.config(bw=profile.new_rate)
             sleep(profile.duration)
 
-class NetEvent2:
-    def __init__(self, link, rate, time):
+class NetEvent2():
+    # Need to think about this constructor
+    def __init__(self, link, client, port, rate, time, type=0, subevent=None):
         self.link = link
+        self.client = client
+        self.port = port
         self.rate = rate
         self.time = time
 
-def absolute_time_profile(link, profile):
+        # 0 == rate change
+        # 1 == notify
+        # 2 == inactive
+        self.type = type
+        self.subevent: NotifyEvent | InactiveNotify | None = subevent
+
+def absolute_time_profile(link, client, port, profile):
     # Make the profile start at 0 + append the link to it
     t = 0
     out = []
+
     for event in profile:
         if type(event) == RateChangeEvent:
-            out.append(NetEvent2(link, event.new_rate, event.duration + t))
+            out.append(NetEvent2(link, client, port, event.new_rate, 
+                                 event.duration + t, 
+                                 type = 0, subevent = event))
             t += event.duration
+
+        elif type(event) == NotifyEvent:
+            out.append(NetEvent2(link, client, port, event.start_rate, 
+                                 event.notification_time + t, 
+                                 type = 1, subevent = event))
+            t += event.notification_time
+
+        elif type(event) == InactiveNotify:
+            out.append(NetEvent2(link, client, port, 0, t, 
+                                 type = 2, subevent = event))
+
     return out
 
 def unify_streams(streams):
     # Streams are pairs of (link, profile_list)
-    a = [absolute_time_profile(link, profile) for link, profile in streams]
+    a = [absolute_time_profile(link, client, port, test_case.net_condition.profile) 
+         for link, client, port, test_case in streams]
 
     # Get flattened list of NetEvent2s
     af = utils.flatten(a)
+
     # Sort by occurrence time
     return sorted(af, key=lambda e: e.time)
 
@@ -299,7 +323,20 @@ def single_thread_playback(streams):
 
     now = 0
     for event in events:
-        sleep(event.time - now)
-        # TODO: Revise to handle all events
-        event.link.intf2.config(bw=event.rate)
-        now = event.time
+        if event.type == 0:
+            sleep(event.time - now)
+            event.link.intf2.config(bw=event.rate)
+            now = event.time
+
+        elif event.type == 1:
+            sleep(event.time - now)
+            send = event.client.popen(["nix-shell", "--run", 
+                                       f"./istream-player/send_event.sh -p {event.port} -m {event.subevent.to_string()}"])
+            print([stream.decode('utf-8') for stream in send.communicate()])
+            now = event.time
+
+        elif event.type == 2:
+            send = event.client.popen(["nix-shell", "--run", 
+                                       f"./istream-player/send_event.sh -p {event.port} --{event.subevent.event_type}"])
+
+            print([stream.decode('utf-8') for stream in send.communicate()])

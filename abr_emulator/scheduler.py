@@ -95,7 +95,7 @@ class TestCase():
                 'server_port': self.server_port,
                 'istream': self.istream}
     
-    def run_test(self, server_host, client_host):
+    def run_test(self, server_host, client_host, port):
         '''Run this test between an already running server_host and new client_host.
 
         Args:
@@ -108,12 +108,13 @@ class TestCase():
 
         # TODO: Probably not this
         # It really should probably be passed the relevant link or something
-        #link = net.linksBetween(net.switches[0], client_host)[0]
+        # link = net.linksBetween(net.switches[0], client_host)[0]
 
         if not self.use_quic:
             # TODO: Clean this up to respect defaults
             # Maybe also fully pull out defaults?
-            format_string = ["nix-shell", "--run", f"./istream-player/istream --mod_downloader tcp -i http://{server_ip}:{self.server_port}/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method}"]
+            format_string = ["nix-shell", "--run", 
+                             f"./istream-player/istream --mod_downloader tcp -i http://{server_ip}:{self.server_port}/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method} --recv_port {port}"]
             istream_client = client_host.popen(format_string)
         else:
             print('this part is totally broken rn sorry')
@@ -206,14 +207,16 @@ class TestDescription():
         domains = [(num_servers, num_clients)]
         topo = MultiSwitchServerClient(domains)
         net = NetCommander(topo)
-        net.start([[(5000, 1000)]*num_servers], [[(250, 250)]*num_clients])
+        net.start([[(5000, 1000)]*num_servers], [[(100, 100)]*num_clients])
 
         client_server_map = {}
-        for (server, clients) in zip(net.servers(), 
-                                     chunks(list(net.clients()), num_servers)):
-            client_server_map = {**client_server_map, **{client: server for client in clients}}
+        for (server, clients) in zip(net.servers(), chunks(list(net.clients()), num_servers)):
+            client_server_map = {**client_server_map, 
+                                 **{client: server 
+                                    for client in clients}}
 
         server_processes = [server.popen('http-server -p %d . &' % 8080) for server in net.servers()]
+
         sleep(2)
 
         done = 0
@@ -226,21 +229,32 @@ class TestDescription():
         batches = list(batched(self.test_cases, num_clients))
 
         for batch in batches:
-
             # TODO: Make sure link and test case match up
             # They should. BUT
+            ports = [5551 + n for n in range(0, num_clients)]
             links = net.client_links()
-            streams = zip(links, [test_case.net_condition.profile for test_case in batch])
+
+            streams = zip(links, 
+                          net.clients(), 
+                          ports,
+                          batch)
+
+            streams = list(streams)
+
+            print(streams)
+
             rate_change_worker = single_threaded_playback_wrapper(streams)
             rate_change_worker.start()
             
-            istream_out = [(test_case, test_case.run_test(client_server_map[client], client))
-                           for test_case, client in zip(batch, net.clients())]
+            istream_out = [(test_case, test_case.run_test(client_server_map[client], client, port))
+                           for _link, client, port, test_case in streams]
 
-            streams = [(test_case, result.communicate()) for test_case, result in istream_out]
+            results_streams = [(test_case, result.communicate()) for test_case, result in istream_out]
 
-            for test_case, stream_set in streams:
+            for test_case, stream_set in results_streams:
                 manifest = test_case.manifest()
+                header_filename = os.path.join(self.results_dir, str(test_case.uuid) + '-header.txt')
+                error_filename = os.path.join(self.results_dir, str(test_case.uuid) + '-log.txt')
                 result_filename = os.path.join(self.results_dir, str(test_case.uuid) + '.json')
 
                 result = stream_set[0].decode('utf-8')
@@ -248,10 +262,14 @@ class TestDescription():
 
                 if len(result) != 0:
                     split = result.partition('{')
-                    _results_header = split[0]
+                    results_header = split[0]
 
-                    results_json = json.loads(split[1] + split[2])
+                    results_json = {'manifest': manifest, 'result': json.loads(split[1] + split[2])}
 
+                    with open(header_filename, 'w+') as header_file:
+                        header_file.write(results_header)
+                    with open(error_filename, 'w+') as error_file:
+                        error_file.write(error)
                     with open(result_filename, 'w+') as results_file:
                         json.dump(results_json, results_file)
                 else:
