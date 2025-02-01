@@ -15,12 +15,12 @@ def playback_wrapper(link, network_profiles):
 profile = [network.RateChangeEvent(rate, duration) 
            for rate, duration in [(100, 15), (10, 15)]]
 
-domains = [(1, 1)]
+domains = [(1, 4)]
 topo = network.MultiSwitchServerClient(domains)
 
 net = network.NetCommander(topo)
                            
-net.start([[(5000, 1000)]], [[(250, 250)]*1])
+net.start([[(5000, 1000)]], [[(250, 250)]*4])
 
 # Grab the first link and make it unlucky
 unlucky_link = net.client_links()[0]

@@ -8,8 +8,6 @@ from mininet.util import custom
 from dataclasses import dataclass
 from time import sleep
 
-from .config import DEFAULTS
-
 import abr_emulator.utils as utils
 
 @dataclass
@@ -31,6 +29,10 @@ class NotifyEvent():
     outage_rate: float
     end_rate: float
 
+    start_error: float
+    end_error: float
+    rate_error: int
+
     def to_string(self):
         return f'{self.start_rate},{self.outage_rate},{self.end_rate},{self.notification_time},{self.outage_duration},{self.last_valid}'
 
@@ -47,7 +49,8 @@ class NetworkProfile():
                  notify_time, 
                  outage_time, 
                  valid_time, 
-                 after_time):
+                 after_time,
+                 error_trio=None):
 
         self.summary = f'{initial_rate}, {outage_rate}, {new_rate}, {before_time}, {notify_time}, {outage_time}, {valid_time}, {after_time}'
 
@@ -60,6 +63,17 @@ class NetworkProfile():
         self.valid = valid_time
         self.after_time = after_time
 
+        if error_trio is not None:
+            start_error, end_error, rate_error = error_trio
+
+            self.start_error = start_error
+            self.end_error = end_error
+            self.rate_error = rate_error
+        else:
+            start_error = None
+            end_error = None
+            rate_error = None
+
         self.profile = [RateChangeEvent(initial_rate, 
                                         before_time-notify_time), 
                         NotifyEvent(notify_time, 
@@ -67,7 +81,10 @@ class NetworkProfile():
                                     valid_time, 
                                     initial_rate, 
                                     outage_rate, 
-                                    new_rate),
+                                    new_rate,
+                                    start_error,
+                                    end_error,
+                                    rate_error),
                         RateChangeEvent(initial_rate, 
                                         notify_time),
                         RateChangeEvent(outage_rate, 
@@ -321,6 +338,8 @@ def unify_streams(streams):
 def single_thread_playback(streams):
     events = unify_streams(streams)
 
+    print([event.time for event in events])
+
     now = 0
     for event in events:
         if event.type == 0:
@@ -332,11 +351,12 @@ def single_thread_playback(streams):
             sleep(event.time - now)
             send = event.client.popen(["nix-shell", "--run", 
                                        f"./istream-player/send_event.sh -p {event.port} -m {event.subevent.to_string()}"])
-            print([stream.decode('utf-8') for stream in send.communicate()])
+            # print([stream.decode('utf-8') for stream in send.communicate()])
             now = event.time
 
         elif event.type == 2:
             send = event.client.popen(["nix-shell", "--run", 
                                        f"./istream-player/send_event.sh -p {event.port} --{event.subevent.event_type}"])
+            # print([stream.decode('utf-8') for stream in send.communicate()])
 
-            print([stream.decode('utf-8') for stream in send.communicate()])
+    print('finished playback')

@@ -4,7 +4,7 @@ import os
 import json
 
 from dataclasses import dataclass
-from time import sleep
+from time import (sleep, time, ctime)
 from typing import List
 
 from mininet.clean import cleanup
@@ -12,9 +12,9 @@ from mininet.net import Mininet
 from mininet.link import TCIntf
 from mininet.util import custom
 
-from .config import DEFAULTS
-from .networking import *
-from .utils import *
+from abr_emulator.config import DEFAULTS
+from abr_emulator.networking import *
+from abr_emulator.utils import *
 
 def rate_change_worker(a, b, c):
     ''' rate_change_worker 
@@ -60,6 +60,7 @@ class TestCase():
                  video_mpd, 
                  video_name, 
                  abr, 
+                 error_trio,
                  search_method, 
                  net_condition, 
                  max_buffer, 
@@ -79,6 +80,11 @@ class TestCase():
         self.initial_buffer = initial_buffer
         self.use_quic = use_quic 
         self.n = n
+
+        start_error, end_error, rate_error = error_trio
+        self.start_error = start_error
+        self.end_error = end_error
+        self.rate_error = rate_error
 
     def manifest(self):
         return {'filename': str(self.uuid),
@@ -104,17 +110,21 @@ class TestCase():
             client_host (`Mininet.Host`): The host to run the test on.
         '''        
         server_ip = server_host.IP()
+        print(f'server host, {server_host}, IP: {server_ip}')
+        client_ip  = client_host.IP()
+        print(f'client host, {client_host}, IP: {client_ip}')
         # Control link
 
         # TODO: Probably not this
         # It really should probably be passed the relevant link or something
         # link = net.linksBetween(net.switches[0], client_host)[0]
 
+        print(f'begin: {server_host} <-> {client_host}')
         if not self.use_quic:
             # TODO: Clean this up to respect defaults
             # Maybe also fully pull out defaults?
             format_string = ["nix-shell", "--run", 
-                             f"./istream-player/istream --mod_downloader tcp -i http://{server_ip}:{self.server_port}/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method} --recv_port {port}"]
+                             f"./istream-player/istream --mod_downloader tcp -i http://{server_ip}:{self.server_port}/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method} --recv_port {port} --quiet"]
             istream_client = client_host.popen(format_string)
         else:
             print('this part is totally broken rn sorry')
@@ -123,7 +133,7 @@ class TestCase():
                 f'{self.quictun_client} --listen-on tcp:127.0.0.1:6500 --server-endpoint {server_ip}:7500 --token tcp:{server_ip}:{self.server_port} --insecure-skip-verify True &')
             istream_client = client_host.popen(
                 f'{self.istream} --mod_downloader tcp -i http://127.0.0.1:6500/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method}')
-        
+        print(f'end: {server_host} <-> {client_host}')
         return istream_client
 
 @dataclass
@@ -155,6 +165,7 @@ class TestDescription():
                       rates, 
                       durations, 
                       notify_times, 
+                      notify_errors,
                       abrs, 
                       search_methods,
                       max_buffers, 
@@ -167,6 +178,7 @@ class TestDescription():
                                       rates,
                                       durations,
                                       notify_times,
+                                      notify_errors,
                                       abrs,
                                       search_methods,
                                       max_buffers,
@@ -174,7 +186,7 @@ class TestDescription():
                                       initial_buffers, 
                                       use_quic,
                                       range(0,N)):
-            video, rate_trio, duration_trio, notification_trio, abr, search_method, max_buffer, initial_quality, initial_buffer, proto, n = case
+            video, rate_trio, duration_trio, notification_trio, error_trio, abr, search_method, max_buffer, initial_quality, initial_buffer, proto, n = case
             video_url, video_name = video
             initial_rate, outage_rate, new_rate = rate_trio
             before_time, outage_time, after_time = duration_trio
@@ -192,6 +204,7 @@ class TestDescription():
             self.test_cases.append(TestCase(video_url, 
                                             video_name, 
                                             abr, 
+                                            error_trio,
                                             search_method,
                                             network_conditions, 
                                             max_buffer,
@@ -202,7 +215,7 @@ class TestDescription():
             
             os.makedirs(self.results_dir, exist_ok=True)
 
-    def run_tests(self, num_servers, num_clients):
+    def run_tests(self, num_servers, num_clients, write_headers=True, write_errors=True):
         # Just put them all on one domain rn
         domains = [(num_servers, num_clients)]
         topo = MultiSwitchServerClient(domains)
@@ -224,7 +237,6 @@ class TestDescription():
 
         # This batches the list in the wrong way unfortunately
         # batches = list(chunks(self.test_cases, 5))
-        # print(len(batches), batches)
 
         batches = list(batched(self.test_cases, num_clients))
 
@@ -241,20 +253,46 @@ class TestDescription():
 
             streams = list(streams)
 
-            print(streams)
-
             rate_change_worker = single_threaded_playback_wrapper(streams)
-            rate_change_worker.start()
+            #rate_change_worker.start()
             
+            start_time = time()
+            print('Starting tests')
             istream_out = [(test_case, test_case.run_test(client_server_map[client], client, port))
                            for _link, client, port, test_case in streams]
+            
+            print(istream_out)
 
-            results_streams = [(test_case, result.communicate()) for test_case, result in istream_out]
+            print('Waiting for tests to finish')
+            # Possible that blocking test result collection is a bottleneck
+            # If this is true: Each result.communicate is running not in parallel but in sequence.
+            #results_streams = [(test_case, result.communicate()) for test_case, result in istream_out]
+
+            results_streams = []
+            for test_case, result_stream in istream_out:
+                per_time_time = time()
+                print(ctime())
+                print('waiting')
+                r = result_stream.communicate()
+                print('finished waiting')
+                print(ctime())
+                per_test_end_time = time()
+                per_test_elapsed_time = per_test_end_time - per_time_time
+                print(f'Per test time: {per_test_elapsed_time}')
+                results_streams.append((test_case, r))
+
+            end_time = time()
+
+            test_time = end_time - start_time
+            print(f'Test time: {test_time}')
 
             for test_case, stream_set in results_streams:
                 manifest = test_case.manifest()
-                header_filename = os.path.join(self.results_dir, str(test_case.uuid) + '-header.txt')
-                error_filename = os.path.join(self.results_dir, str(test_case.uuid) + '-log.txt')
+                if write_headers:
+                    header_filename = os.path.join(self.results_dir, str(test_case.uuid) + '-header.txt')
+                if write_errors:
+                    error_filename = os.path.join(self.results_dir, str(test_case.uuid) + '-log.txt')
+
                 result_filename = os.path.join(self.results_dir, str(test_case.uuid) + '.json')
 
                 result = stream_set[0].decode('utf-8')
@@ -266,10 +304,13 @@ class TestDescription():
 
                     results_json = {'manifest': manifest, 'result': json.loads(split[1] + split[2])}
 
-                    with open(header_filename, 'w+') as header_file:
-                        header_file.write(results_header)
-                    with open(error_filename, 'w+') as error_file:
-                        error_file.write(error)
+                    if write_headers:
+                        with open(header_filename, 'w+') as header_file:
+                            header_file.write(results_header)
+                    if write_errors:
+                        with open(error_filename, 'w+') as error_file:
+                            error_file.write(error)
+
                     with open(result_filename, 'w+') as results_file:
                         json.dump(results_json, results_file)
                 else:
