@@ -110,16 +110,7 @@ class TestCase():
             client_host (`Mininet.Host`): The host to run the test on.
         '''        
         server_ip = server_host.IP()
-        print(f'server host, {server_host}, IP: {server_ip}')
-        client_ip  = client_host.IP()
-        print(f'client host, {client_host}, IP: {client_ip}')
-        # Control link
 
-        # TODO: Probably not this
-        # It really should probably be passed the relevant link or something
-        # link = net.linksBetween(net.switches[0], client_host)[0]
-
-        print(f'begin: {server_host} <-> {client_host}')
         if not self.use_quic:
             # TODO: Clean this up to respect defaults
             # Maybe also fully pull out defaults?
@@ -133,7 +124,6 @@ class TestCase():
                 f'{self.quictun_client} --listen-on tcp:127.0.0.1:6500 --server-endpoint {server_ip}:7500 --token tcp:{server_ip}:{self.server_port} --insecure-skip-verify True &')
             istream_client = client_host.popen(
                 f'{self.istream} --mod_downloader tcp -i http://127.0.0.1:6500/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method}')
-        print(f'end: {server_host} <-> {client_host}')
         return istream_client
 
 @dataclass
@@ -254,33 +244,25 @@ class TestDescription():
             streams = list(streams)
 
             rate_change_worker = single_threaded_playback_wrapper(streams)
-            #rate_change_worker.start()
+            rate_change_worker.start()
             
             start_time = time()
-            print('Starting tests')
             istream_out = [(test_case, test_case.run_test(client_server_map[client], client, port))
                            for _link, client, port, test_case in streams]
             
-            print(istream_out)
-
-            print('Waiting for tests to finish')
             # Possible that blocking test result collection is a bottleneck
             # If this is true: Each result.communicate is running not in parallel but in sequence.
-            #results_streams = [(test_case, result.communicate()) for test_case, result in istream_out]
+            results_streams = [(test_case, result.communicate()) for test_case, result in istream_out]
 
-            results_streams = []
-            for test_case, result_stream in istream_out:
-                per_time_time = time()
-                print(ctime())
-                print('waiting')
-                r = result_stream.communicate()
-                print('finished waiting')
-                print(ctime())
-                per_test_end_time = time()
-                per_test_elapsed_time = per_test_end_time - per_time_time
-                print(f'Per test time: {per_test_elapsed_time}')
-                results_streams.append((test_case, r))
-
+#            results_streams = []
+#            for test_case, result_stream in istream_out:
+#                per_time_time = time()
+#                r = result_stream.communicate()
+#                per_test_end_time = time()
+#                per_test_elapsed_time = per_test_end_time - per_time_time
+#                print(f'Per test time: {per_test_elapsed_time}')
+#                results_streams.append((test_case, r))
+#
             end_time = time()
 
             test_time = end_time - start_time

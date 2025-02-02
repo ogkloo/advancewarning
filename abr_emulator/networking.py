@@ -338,8 +338,6 @@ def unify_streams(streams):
 def single_thread_playback(streams):
     events = unify_streams(streams)
 
-    print([event.time for event in events])
-
     now = 0
     for event in events:
         if event.type == 0:
@@ -358,5 +356,3 @@ def single_thread_playback(streams):
             send = event.client.popen(["nix-shell", "--run", 
                                        f"./istream-player/send_event.sh -p {event.port} --{event.subevent.event_type}"])
             # print([stream.decode('utf-8') for stream in send.communicate()])
-
-    print('finished playback')
