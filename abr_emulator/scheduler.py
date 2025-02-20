@@ -120,10 +120,16 @@ class TestCase():
         else:
             print('this part is totally broken rn sorry')
             exit(1)
-            quictun_client_out = client_host.popen(
-                f'{self.quictun_client} --listen-on tcp:127.0.0.1:6500 --server-endpoint {server_ip}:7500 --token tcp:{server_ip}:{self.server_port} --insecure-skip-verify True &')
-            istream_client = client_host.popen(
-                f'{self.istream} --mod_downloader tcp -i http://127.0.0.1:6500/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method}')
+            command = ["nix-shell", "--run", 
+                        f"{self.quictun_client} --listen-on tcp:127.0.0.1:6500 --server-endpoint {server_ip}:7500 --token tcp:{server_ip}:{self.server_port} --insecure-skip-verify True &')"]
+
+            quictun_client_out = client_host.popen(command)
+
+            istream_command = ["nix-shell", "--run", 
+                                f"{self.istream} --mod_downloader tcp -i http://127.0.0.1:6500/{self.video.url} --mod_abr {self.abr} --max_buffer {self.max_buffer} --search_method {self.search_method}"]
+
+            istream_client = client_host.popen(istream_command)
+
         return istream_client
 
 @dataclass
@@ -189,7 +195,8 @@ class TestDescription():
                                                 notify_time, 
                                                 outage_time, 
                                                 last_valid,
-                                                after_time)
+                                                after_time,
+                                                error_trio)
 
             self.test_cases.append(TestCase(video_url, 
                                             video_name, 
@@ -204,6 +211,9 @@ class TestDescription():
                                             n))
             
             os.makedirs(self.results_dir, exist_ok=True)
+    
+    def num_tests(self):
+        return len(self.test_cases)
 
     def run_tests(self, num_servers, num_clients, write_headers=True, write_errors=True):
         # Just put them all on one domain rn

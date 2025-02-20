@@ -19,28 +19,31 @@ elif args.video is not None:
     video_names = map(lambda video_path: os.path.basename(os.path.dirname(video_path)), args.video)
     videos = list(zip(args.video, video_names))
 
-tests = scheduler.TestDescription([], 'tests/results')
+tests = scheduler.TestDescription([], 'results/results-accuracy')
+
+errors = [(x, 0, 0) for x in range(-2, 3)] + [(0, 0, x) for x in range(-50, 60, 25)]
+short_errors = [(x, 0, 0) for x in [-1, 0, 1]]
 
 tests.mk_test_cases(videos=videos, 
-                    rates=[(100, 50, 100),
-                           (200, 50, 200), 
-                           (300, 50, 300), 
-                           (400, 50, 400), 
-                           (500, 50, 500)],
+                    rates=[(200, 50, 200), 
+                           (200, 50, 50)],
                     durations=[(10, 1.0, 20.0), 
                                (10, 2.0, 20.0), 
-                               (10, 3.0, 20.0), 
-                               (10, 4.0, 20.0), 
-                               (10, 5.0, 20.0)],
-                    notify_times=[(3.0, 6.0), (4.0, 6.0), (5.0, 6.0), (6.0, 6.0)], 
-                    notify_errors=[(0.0, 0.0, 0)],
-                    abrs=['bandwidth'], 
-                    search_methods=['none', 'greedy'], 
-                    max_buffers=[3.0, 5.0], 
+                               (10, 3.0, 20.0)],
+                    notify_times=[(3.0, 6.0)], 
+                    notify_errors=errors,
+                    abrs=['bandwidth', 
+                          'buffer', 
+                          'lol'], 
+                    search_methods=['none', 
+                                    'greedy'], 
+                    max_buffers=[3.0], 
                     initial_qualities=[None], 
                     initial_buffers=[None], 
-                    use_quic = [False],
-                    N=1)
+                    use_quic=[False],
+                    N=2)
+
+print(f'Running {tests.num_tests()}')
 
 tests.run_tests(num_servers=1,
                 num_clients=50,

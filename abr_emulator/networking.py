@@ -29,10 +29,6 @@ class NotifyEvent():
     outage_rate: float
     end_rate: float
 
-    start_error: float
-    end_error: float
-    rate_error: int
-
     def to_string(self):
         return f'{self.start_rate},{self.outage_rate},{self.end_rate},{self.notification_time},{self.outage_duration},{self.last_valid}'
 
@@ -52,8 +48,6 @@ class NetworkProfile():
                  after_time,
                  error_trio=None):
 
-        self.summary = f'{initial_rate}, {outage_rate}, {new_rate}, {before_time}, {notify_time}, {outage_time}, {valid_time}, {after_time}'
-
         self.initial_rate = initial_rate
         self.outage_rate = outage_rate
         self.new_rate = new_rate
@@ -70,21 +64,20 @@ class NetworkProfile():
             self.end_error = end_error
             self.rate_error = rate_error
         else:
-            start_error = None
-            end_error = None
-            rate_error = None
+            self.start_error = 0
+            self.end_error = 0 
+            self.rate_error = 0 
+
+        self.summary = f'{initial_rate}, {outage_rate}, {new_rate}, {before_time}, {notify_time}, {outage_time}, {valid_time}, {after_time}, {self.start_error}, {self.end_error}, {self.rate_error}'
 
         self.profile = [RateChangeEvent(initial_rate, 
                                         before_time-notify_time), 
-                        NotifyEvent(notify_time, 
-                                    outage_time, 
+                        NotifyEvent(notify_time + self.start_error, 
+                                    outage_time + self.end_error, 
                                     valid_time, 
                                     initial_rate, 
-                                    outage_rate, 
-                                    new_rate,
-                                    start_error,
-                                    end_error,
-                                    rate_error),
+                                    outage_rate + self.rate_error, 
+                                    new_rate),
                         RateChangeEvent(initial_rate, 
                                         notify_time),
                         RateChangeEvent(outage_rate, 
@@ -99,7 +92,7 @@ class NetworkProfile():
     def get_duration(self):
         return self.before_time + self.outage_time + self.after_time
     
-    def to_json(self) -> dict[int, any]:
+    def to_json(self):
         return {
             'initial_rate': self.initial_rate,
             'outage_rate': self.outage_rate,
@@ -108,7 +101,10 @@ class NetworkProfile():
             'notify_time': self.notify_time,
             'outage_time': self.outage_time,
             'valid': self.valid,
-            'after_time': self.after_time
+            'after_time': self.after_time,
+            'start_error': self.start_error,
+            'end_error': self.end_error,
+            'rate_error': self.rate_error
         }
 
 class SingleSwitchTopo(Topo):
