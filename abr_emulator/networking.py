@@ -20,6 +20,18 @@ class RateChangeEvent():
     duration: float
 
 @dataclass
+class ExplicitNotify():
+    notification_time: float
+    plan: List[int]
+
+    def to_string(self):
+        s = ''
+        for i in self.plan:
+            s += ',' + str(i)
+        return s
+
+
+@dataclass
 class NotifyEvent():
     notification_time: float
     outage_duration: float
@@ -46,7 +58,8 @@ class NetworkProfile():
                  outage_time, 
                  valid_time, 
                  after_time,
-                 error_trio=None):
+                 error_trio=None,
+                 plan=None):
 
         self.initial_rate = initial_rate
         self.outage_rate = outage_rate
@@ -70,22 +83,34 @@ class NetworkProfile():
 
         self.summary = f'{initial_rate}, {outage_rate}, {new_rate}, {before_time}, {notify_time}, {outage_time}, {valid_time}, {after_time}, {self.start_error}, {self.end_error}, {self.rate_error}'
 
-        self.profile = [RateChangeEvent(initial_rate, 
-                                        before_time-notify_time), 
-                        NotifyEvent(notify_time + self.start_error, 
-                                    outage_time + self.end_error, 
-                                    valid_time, 
-                                    initial_rate, 
-                                    outage_rate + self.rate_error, 
-                                    new_rate),
-                        RateChangeEvent(initial_rate, 
-                                        notify_time),
-                        RateChangeEvent(outage_rate, 
-                                        outage_time), 
-                        InactiveNotify('stop'),
-                        RateChangeEvent(new_rate, 
-                                        after_time)]
-    
+        if plan is None:
+            self.profile = [RateChangeEvent(initial_rate, 
+                                            before_time-notify_time), 
+                            NotifyEvent(notify_time + self.start_error, 
+                                        outage_time + self.end_error, 
+                                        valid_time, 
+                                        initial_rate, 
+                                        outage_rate + self.rate_error, 
+                                        new_rate),
+                            RateChangeEvent(initial_rate, 
+                                            notify_time),
+                            RateChangeEvent(outage_rate, 
+                                            outage_time), 
+                            InactiveNotify('stop'),
+                            RateChangeEvent(new_rate, 
+                                            after_time)]
+        else:
+            self.profile = [RateChangeEvent(initial_rate, 
+                                            before_time-notify_time), 
+                            ExplicitNotify(notify_time + self.start_error, plan),
+                            RateChangeEvent(initial_rate, 
+                                            notify_time),
+                            RateChangeEvent(outage_rate, 
+                                            outage_time), 
+                            InactiveNotify('stop'),
+                            RateChangeEvent(new_rate, 
+                                            after_time)]
+
     def summarize(self):
         return self.summary
 
@@ -294,7 +319,7 @@ class NetEvent2():
         # 1 == notify
         # 2 == inactive
         self.type = type
-        self.subevent: NotifyEvent | InactiveNotify | None = subevent
+        self.subevent: RateChangeEvent | NotifyEvent | InactiveNotify | None = subevent
 
 def absolute_time_profile(link, client, port, profile):
     # Make the profile start at 0 + append the link to it
@@ -317,6 +342,12 @@ def absolute_time_profile(link, client, port, profile):
         elif type(event) == InactiveNotify:
             out.append(NetEvent2(link, client, port, 0, t, 
                                  type = 2, subevent = event))
+
+        elif type(event) == ExplicitNotify:
+            out.append(NetEvent2(link, client, port, 0, 
+                                 event.notification_time + t, 
+                                 type = 3, subevent = event))
+            t += event.notification_time
 
     return out
 
@@ -351,4 +382,10 @@ def single_thread_playback(streams):
         elif event.type == 2:
             send = event.client.popen(["nix-shell", "--run", 
                                        f"./istream-player/send_event.sh -p {event.port} --{event.subevent.event_type}"])
-            # print([stream.decode('utf-8') for stream in send.communicate()])
+
+        elif event.type == 3:
+            sleep(event.time - now)
+            send = event.client.popen(["nix-shell", "--run", 
+                                       f"./istream-player/send_event.sh --explicit -p {event.port} -m {event.subevent.to_string()}"])
+            #print([stream.decode('utf-8') for stream in send.communicate()])
+            now = event.time

@@ -278,6 +278,8 @@ class TestDescription():
             test_time = end_time - start_time
             print(f'Test time: {test_time}')
 
+            results = []
+
             for test_case, stream_set in results_streams:
                 manifest = test_case.manifest()
                 if write_headers:
@@ -295,6 +297,7 @@ class TestDescription():
                     results_header = split[0]
 
                     results_json = {'manifest': manifest, 'result': json.loads(split[1] + split[2])}
+                    results.append((test_case, results_json['result']))
 
                     if write_headers:
                         with open(header_filename, 'w+') as header_file:
@@ -313,3 +316,4 @@ class TestDescription():
                 print(f'{done} / {len(self.test_cases)}')
         
         net.stop()
+        return results
