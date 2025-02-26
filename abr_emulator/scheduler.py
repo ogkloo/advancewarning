@@ -5,7 +5,7 @@ import json
 
 from dataclasses import dataclass
 from time import (sleep, time, ctime)
-from typing import List
+from typing import List, Tuple, Dict
 
 from mininet.clean import cleanup
 from mininet.net import Mininet
@@ -44,7 +44,8 @@ class TestCase():
     video: Video
     abr: str
     search_method: str
-    net_condition: List[RateChangeEvent | NotifyEvent | InactiveNotify]
+    net_condition: NetworkProfile
+    #List[RateChangeEvent | NotifyEvent | InactiveNotify]
     max_buffer: float
     initial_quality: int
     initial_buffer: float
@@ -156,8 +157,11 @@ class TestDescription():
     # How often to print out done/test_cases while running tests.
     update: int = 10
 
+    def init(self):
+        os.makedirs(self.results_dir, exist_ok=True)
+
     def mk_test_cases(self, 
-                      videos, 
+                      videos: List[Tuple[str, str]], 
                       rates, 
                       durations, 
                       notify_times, 
@@ -170,7 +174,7 @@ class TestDescription():
                       use_quic, 
                       N):
 
-        for case in itertools.product(videos,
+        for test_case in itertools.product(videos,
                                       rates,
                                       durations,
                                       notify_times,
@@ -182,7 +186,7 @@ class TestDescription():
                                       initial_buffers, 
                                       use_quic,
                                       range(0,N)):
-            video, rate_trio, duration_trio, notification_trio, error_trio, abr, search_method, max_buffer, initial_quality, initial_buffer, proto, n = case
+            video, rate_trio, duration_trio, notification_trio, error_trio, abr, search_method, max_buffer, initial_quality, initial_buffer, proto, n = test_case
             video_url, video_name = video
             initial_rate, outage_rate, new_rate = rate_trio
             before_time, outage_time, after_time = duration_trio
@@ -209,28 +213,39 @@ class TestDescription():
                                             initial_buffer, 
                                             proto, 
                                             n))
-            
-            os.makedirs(self.results_dir, exist_ok=True)
     
     def num_tests(self):
         return len(self.test_cases)
+    
+    def start_net(self, num_servers, num_clients):
+        self.domains = [(num_servers, num_clients)]
+        topo = MultiSwitchServerClient(self.domains)
+        self.net = NetCommander(topo)
+        self.net.start([[(5000, 1000)]*num_servers], [[(500, 500)]*num_clients])
 
-    def run_tests(self, num_servers, num_clients, write_headers=True, write_errors=True):
         # Just put them all on one domain rn
-        domains = [(num_servers, num_clients)]
-        topo = MultiSwitchServerClient(domains)
-        net = NetCommander(topo)
-        net.start([[(5000, 1000)]*num_servers], [[(100, 100)]*num_clients])
+        self.client_server_map: Dict = {}
+        for (server, clients) in zip(self.net.servers(), chunks(list(self.net.clients()), num_servers)):
+            self.client_server_map = {**self.client_server_map, 
+                                      **{client: server for client in clients}}
 
-        client_server_map = {}
-        for (server, clients) in zip(net.servers(), chunks(list(net.clients()), num_servers)):
-            client_server_map = {**client_server_map, 
-                                 **{client: server 
-                                    for client in clients}}
-
-        server_processes = [server.popen('http-server -p %d . &' % 8080) for server in net.servers()]
+        self.server_processes = [server.popen('http-server -p %d . &' % 8080) 
+                                 for server in self.net.servers()]
 
         sleep(2)
+    
+    def stop_net(self):
+        self.domains = []
+        self.client_server_map = {}
+        self.net.stop()
+
+    def run_tests(self, write_headers=True, write_errors=True):
+        domains = self.domains
+        net = self.net
+
+        num_servers, num_clients = domains[0]
+
+        client_server_map = self.client_server_map
 
         done = 0
         print(f'0 / {len(self.test_cases)}')
@@ -239,6 +254,8 @@ class TestDescription():
         # batches = list(chunks(self.test_cases, 5))
 
         batches = list(batched(self.test_cases, num_clients))
+
+        results_out = []
 
         for batch in batches:
             # TODO: Make sure link and test case match up
@@ -276,44 +293,41 @@ class TestDescription():
             end_time = time()
 
             test_time = end_time - start_time
-            print(f'Test time: {test_time}')
+            #print(f'Test time: {test_time}')
 
-            results = []
-
+            #print(len(results_streams))
             for test_case, stream_set in results_streams:
                 manifest = test_case.manifest()
-                if write_headers:
-                    header_filename = os.path.join(self.results_dir, str(test_case.uuid) + '-header.txt')
-                if write_errors:
-                    error_filename = os.path.join(self.results_dir, str(test_case.uuid) + '-log.txt')
-
-                result_filename = os.path.join(self.results_dir, str(test_case.uuid) + '.json')
 
                 result = stream_set[0].decode('utf-8')
                 error = stream_set[1].decode('utf-8')
 
+                #print(f'started: {test_case.abr}')
                 if len(result) != 0:
+                    #print(f'processing {test_case.abr}')
                     split = result.partition('{')
                     results_header = split[0]
 
                     results_json = {'manifest': manifest, 'result': json.loads(split[1] + split[2])}
-                    results.append((test_case, results_json['result']))
+
+                    results_out.append((test_case, results_json['result']))
 
                     if write_headers:
+                        header_filename = os.path.join(self.results_dir, str(test_case.uuid) + '-header.txt')
                         with open(header_filename, 'w+') as header_file:
                             header_file.write(results_header)
                     if write_errors:
+                        error_filename = os.path.join(self.results_dir, str(test_case.uuid) + '-log.txt')
                         with open(error_filename, 'w+') as error_file:
                             error_file.write(error)
 
+                    result_filename = os.path.join(self.results_dir, str(test_case.uuid) + '.json')
                     with open(result_filename, 'w+') as results_file:
                         json.dump(results_json, results_file)
                 else:
                     print(error)
 
             done += len(batch)
-            if done % self.update == 0:
-                print(f'{done} / {len(self.test_cases)}')
+            print(f'{done} / {len(self.test_cases)}')
         
-        net.stop()
-        return results
+        return results_out
