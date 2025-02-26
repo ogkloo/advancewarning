@@ -60,18 +60,18 @@ tests.mk_test_cases(videos=videos,
                     abrs=['bandwidth', 'buffer', 'lol'],
                     #abrs=['bandwidth'],
                     search_methods=['none'],
-                    max_buffers=[2.0, 3.0, 5.0, 10.0], 
+                    max_buffers=[3.0, 10.0], 
                     initial_qualities=[None], 
                     initial_buffers=[None], 
                     use_quic=[False],
-                    N=4)
+                    N=2)
 
 # Exit if we don't need to do a full run
 if args.pure:
     print(f'Number of tests: {tests.num_tests()}')
     exit(0)
 
-print(f'Running {tests.num_tests()} using {num_servers} servers and {num_clients} clients')
+print(f'Running {tests.num_tests()} tests using {num_servers} servers and {num_clients} clients')
 
 tests.start_net(num_servers=num_servers, num_clients=num_clients)
 results = tests.run_tests(write_headers=False,write_errors=False)
