@@ -1,3 +1,7 @@
-# Code for MetaCom
+# PRISM-XR: Predictive Real-Time Intelligent Streaming for 360-Degree Multimedia
 
-This repo contains code used to test our submission to MetaCom.
+New, bandwidth intensive video formats intended for Metaverse content such as virtual and augmented reality threaten to strain radio resources beyond the breaking point. To address these challenges, both the cellular and WiFi standardization communities have adopted mmWave wireless to provide ultra-high data rate and low-latency communication. However, mmWave systems are susceptible to blockages, which can cause sudden and wide fluctuations in throughput, which Adaptive Bitrate (ABR) strategies are too slow to react to. **This paper introduces a proactive video bitrate adaptation system called PRISM-XR, which builds on recent advances in wireless research predicting and mitigating blockages at the physical and link layers. PRISM-XR operates in tandem with other ABR strategies, interrupting control when notified of a blockage by predictive intelligence available at the physical layer.** 
+
+In order to characterize video streaming over mmWave, we carry out Over-The-Air (OTA) experiments using real mmWave radios. Our evaluation highlights the role of the transport layer (e.g., TCP vs QUIC) in video quality, finding that the use of QUIC results in severe performance degradation. We then evaluate our solution through Mininet emulations, and show that PRISM-XR can significantly improve QoE (Quality-of-Experience) over standard ABR methods when using TCP as the transport protocol.
+
+This repo includes the code that was used to test this concept and produce the results seen in the paper.
